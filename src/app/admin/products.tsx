@@ -2,13 +2,15 @@
 import {useState} from 'react';
 import {collection,doc,setDoc,deleteDoc,getDoc} from 'firebase/firestore';
 import {ref,uploadBytes,getDownloadURL} from 'firebase/storage';
-import {db,storage} from '@/lib/firebase';
+import {db,storage,fns} from '@/lib/firebase';
+import {httpsCallable} from 'firebase/functions';
 import {useStore} from '@/lib/store';
 import {UNITS} from '@/lib/types';
 const blank:any={sku:'',name:'',category:'Beef',description:'',unit:'KG',stock:0,retailPrice:0,promoPrice:0,staffPrice:0,purchasePrice:0,minPricePcs:0,minPriceCtn:0,priceSlabs:[],imageUrl:'',status:'active'};
 export function Products(){
   const {products,role}=useStore();const [f,setF]=useState<any>(blank);const [msg,setMsg]=useState('');const [old,setOld]=useState<any>(null);
   const [uploading,setUploading]=useState(false);
+  const [migrating,setMigrating]=useState(false);
   const k=(n:string)=>(e:any)=>setF({...f,[n]:['stock','retailPrice','promoPrice','staffPrice','purchasePrice','minPricePcs','minPriceCtn'].includes(n)?+e.target.value:e.target.value});
 
   const updateSlab=(idx:number,field:'minQty'|'price',val:number)=>{
@@ -82,6 +84,19 @@ export function Products(){
       setUploading(false);
     }
   }
+  async function migratePrivateFields(){
+    if(!confirm('Move legacy product cost and minimum-price fields into the admin-only collection? This can be safely rerun.'))return;
+    setMigrating(true);setMsg('Migrating private product fields...');
+    try{
+      const runMigration=httpsCallable(fns,'migratePrivateProductFields');
+      const result=await runMigration({});
+      const data=result.data as {scanned:number;migrated:number};
+      setMsg(`Migration complete: scanned ${data.scanned} products; migrated ${data.migrated} products.`);
+    }catch(err:any){
+      setMsg('Migration failed. Do not deploy the new security rules until this is resolved.');
+    }finally{setMigrating(false)}
+  }
+
   const [search,setSearch]=useState('');
 
   const filteredProducts = products.filter(p=>
@@ -184,6 +199,7 @@ export function Products(){
           <button className="btn flex-1" disabled={uploading} onClick={save}>{uploading?'Uploading...':'Save product'}</button>
           {old&&<button className="btn-alt" onClick={()=>{setF(blank);setOld(null)}}>Cancel</button>}
         </div>
+        {role==='admin'&&<button type="button" className="btn-alt w-full text-xs" disabled={migrating} onClick={migratePrivateFields}>{migrating?'Migrating private fields...':'🔐 Migrate legacy private price fields'}</button>}
         {msg&&<p role="status" className="text-xs font-medium text-brine">{msg}</p>}
       </div>
 
