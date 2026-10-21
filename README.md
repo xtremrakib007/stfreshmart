@@ -11,7 +11,9 @@
 ## How it is secured
 - Staff prices are in `staffPrices/{sku}`; rules allow only active staff/admin to read them.
 - Customers can read active product documents; private cost and minimum-price values belong in the admin-only `productPrivate/{sku}` collection.
-- Orders must be created through the `createOrder` Cloud Function, which recalculates prices and validates stock before saving.
+- Orders must be created through the `createOrder` Cloud Function, which recalculates prices and checks stock before saving.
+- Order status transitions and stock deduction/restoration are handled by the trusted `updateOrderStatus` Cloud Function; direct client order updates are denied.
+- Product create/update/delete operations are admin-only. Inventory history is written by trusted functions, not directly by clients.
 - Staff accounts are created by Cloud Functions, never from the browser.
 - Product image uploads are limited to active admins and files under 5 MB.
 - Staff order updates are limited to workflow fields; direct client creation of order documents is denied.
@@ -19,6 +21,6 @@
 ## Known limits / before production
 - Deployment/migration sequence matters: deploy the callable and admin UI, sign in as an administrator, use Admin > Products > “Migrate legacy private price fields”, verify completion, and only then deploy the hardened Firestore rules. Until migration completes, legacy fields in existing product documents may still be readable by clients. Back up Firestore first.
 - The migration is admin-only and safe to rerun, but verify the reported counts and sample documents before tightening rules.
-- Stock is checked at order submission and again when staff accepts the order, but it is not reserved at submission time.
+- Stock is checked at order submission and atomically rechecked/deducted when staff accepts the order. Stock is not reserved at submission time, so orders can be rejected at acceptance if another order uses the stock first.
 - Order alerts are in-app (sound, badge, tab title) while the admin page is open. No push or email yet.
 - Run build, function checks, and Firebase Emulator security-rule tests before deploying.
