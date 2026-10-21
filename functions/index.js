@@ -21,8 +21,25 @@ exports.setStaffActive=onCall(opt,async req=>{await guard(req);
   const {uid,active}=req.data||{};
   if(typeof uid!=='string'||!uid.trim()||uid.length>128)throw new HttpsError('invalid-argument','A valid staff user ID is required.');
   if(typeof active!=='boolean')throw new HttpsError('invalid-argument','Active status must be true or false.');
-  if(uid===req.auth.uid)throw new HttpsError('failed-precondition','You cannot disable your own account.');
-  await admin.auth().updateUser(uid,{disabled:!active});await db.doc(`users/${uid}`).update({active:!!active});return {ok:true};
+  const targetUid=uid.trim();
+  if(targetUid===req.auth.uid)throw new HttpsError('failed-precondition','You cannot change your own account status.');
+  const userRef=db.doc(`users/${targetUid}`);
+  const userSnap=await userRef.get();
+  if(!userSnap.exists||!['staff','admin'].includes(userSnap.data().role))
+    throw new HttpsError('not-found','Staff account not found.');
+  let authUser;
+  try{authUser=await admin.auth().getUser(targetUid);}
+  catch(e){if(e.code==='auth/user-not-found')throw new HttpsError('not-found','Staff authentication account not found.');throw e;}
+  const previousDisabled=authUser.disabled===true;
+  await admin.auth().updateUser(targetUid,{disabled:!active});
+  try{
+    await userRef.update({active});
+  }catch(e){
+    try{await admin.auth().updateUser(targetUid,{disabled:previousDisabled});}
+    catch(rollbackError){console.error('Failed to roll back staff Auth status after Firestore update failure.',rollbackError);}
+    throw new HttpsError('internal','Could not update staff status. Please retry or verify the account status.');
+  }
+  return {ok:true};
 });
 exports.resetStaffPassword=onCall(opt,async req=>{await guard(req);
   const u=await admin.auth().getUser(req.data.uid);return {link:await admin.auth().generatePasswordResetLink(u.email)};
