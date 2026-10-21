@@ -106,6 +106,10 @@ export function Products(){
       const runMigration=httpsCallable(fns,'migratePrivateProductFields');
       const result=await runMigration({});
       const data=result.data as {scanned:number;migrated:number};
+      const privateSnap=await getDocs(collection(db,'productPrivate'));
+      const next:Record<string,any>={};
+      privateSnap.docs.forEach(d=>{next[d.id]=d.data()});
+      setPrivatePrices(next);
       setMsg(`Migration complete: scanned ${data.scanned} products; migrated ${data.migrated} products.`);
     }catch(err:any){
       setMsg('Migration failed. Do not deploy the new security rules until this is resolved.');
@@ -130,7 +134,7 @@ export function Products(){
             </span>
           )}
         </div>
-        {(['sku','name','description','imageUrl'] as const).map(n=><input key={n} className="inp" placeholder={n} value={f[n]} onChange={k(n)}/>)}
+        {(['sku','name','description','imageUrl'] as const).map(n=><input key={n} className="inp" placeholder={n} value={f[n]} disabled={!!old&&n==='sku'} onChange={k(n)}/>)}
         <div className="space-y-1">
           <label className="lbl">Product photo</label>
           <input type="file" accept="image/*" disabled={uploading} onChange={e=>e.target.files&&upload(e.target.files[0])}/>
