@@ -1,6 +1,6 @@
 'use client';
-import {useState} from 'react';
-import {collection,doc,setDoc,deleteDoc,getDoc,serverTimestamp} from 'firebase/firestore';
+import {useState,useEffect} from 'react';
+import {collection,doc,setDoc,deleteDoc,getDoc,getDocs,serverTimestamp} from 'firebase/firestore';
 import {ref,uploadBytes,getDownloadURL} from 'firebase/storage';
 import {db,storage,fns} from '@/lib/firebase';
 import {httpsCallable} from 'firebase/functions';
@@ -11,6 +11,15 @@ export function Products(){
   const {products,role}=useStore();const [f,setF]=useState<any>(blank);const [msg,setMsg]=useState('');const [old,setOld]=useState<any>(null);
   const [uploading,setUploading]=useState(false);
   const [migrating,setMigrating]=useState(false);
+  const [privatePrices,setPrivatePrices]=useState<Record<string,any>>({});
+  useEffect(()=>{
+    if(role!=='admin'){setPrivatePrices({});return}
+    let active=true;
+    getDocs(collection(db,'productPrivate')).then(s=>{
+      if(active){const next:Record<string,any>={};s.docs.forEach(d=>{next[d.id]=d.data()});setPrivatePrices(next)}
+    }).catch(()=>{if(active)setMsg('Could not load private product costs. Check admin permissions.')});
+    return ()=>{active=false};
+  },[role]);
   const k=(n:string)=>(e:any)=>setF({...f,[n]:['stock','retailPrice','promoPrice','staffPrice','purchasePrice','minPricePcs','minPriceCtn'].includes(n)?+e.target.value:e.target.value});
 
   const updateSlab=(idx:number,field:'minQty'|'price',val:number)=>{
@@ -68,6 +77,7 @@ export function Products(){
       if(!old||old.stock!==productData.stock)
         await setDoc(doc(collection(db,'inventoryHistory')),{sku:id,from:old?.stock??0,to:productData.stock,reason:'manual',at:serverTimestamp()});
       setF(blank);setOld(null);setMsg('Product saved.');
+      if(role==='admin')setPrivatePrices(prev=>({...prev,[id]:{purchasePrice:Number(purchasePrice)||0,minPricePcs:Number(minPricePcs)||0,minPriceCtn:Number(minPriceCtn)||0}}));
     }catch{setMsg('Could not save. Check your connection and permissions.')}
   }
   async function upload(file:File){
@@ -255,9 +265,9 @@ export function Products(){
                         📊 {p.priceSlabs.length} Slabs (from RM{Math.min(...p.priceSlabs.map(s=>s.price)).toFixed(2)})
                       </span>
                     )}
-                    {role==='admin' && p.purchasePrice ? <span className="bg-emerald-50 text-emerald-800 px-1.5 py-0.5 rounded font-medium border border-emerald-200">Cost: RM{p.purchasePrice.toFixed(2)}</span> : null}
-                    {role==='admin' && p.minPricePcs ? <span className="bg-amber-50 text-amber-800 px-1.5 py-0.5 rounded font-medium border border-amber-200">Min PCS: RM{p.minPricePcs.toFixed(2)}</span> : null}
-                    {role==='admin' && p.minPriceCtn ? <span className="bg-indigo-50 text-indigo-800 px-1.5 py-0.5 rounded font-medium border border-indigo-200">Min CTN: RM{p.minPriceCtn.toFixed(2)}</span> : null}
+                    {role==='admin' && privatePrices[p.id]?.purchasePrice ? <span className="bg-emerald-50 text-emerald-800 px-1.5 py-0.5 rounded font-medium border border-emerald-200">Cost: RM{privatePrices[p.id].purchasePrice.toFixed(2)}</span> : null}
+                    {role==='admin' && privatePrices[p.id]?.minPricePcs ? <span className="bg-amber-50 text-amber-800 px-1.5 py-0.5 rounded font-medium border border-amber-200">Min PCS: RM{privatePrices[p.id].minPricePcs.toFixed(2)}</span> : null}
+                    {role==='admin' && privatePrices[p.id]?.minPriceCtn ? <span className="bg-indigo-50 text-indigo-800 px-1.5 py-0.5 rounded font-medium border border-indigo-200">Min CTN: RM{privatePrices[p.id].minPriceCtn.toFixed(2)}</span> : null}
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
