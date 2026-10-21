@@ -10,14 +10,15 @@
 
 ## How it is secured
 - Staff prices are in `staffPrices/{sku}`; rules allow only active staff/admin to read them.
-- Customers can read active product documents; staff price records are separately protected.
+- Customers can read active product documents; private cost and minimum-price values belong in the admin-only `productPrivate/{sku}` collection.
 - Orders must be created through the `createOrder` Cloud Function, which recalculates prices and validates stock before saving.
 - Staff accounts are created by Cloud Functions, never from the browser.
 - Product image uploads are limited to active admins and files under 5 MB.
 - Staff order updates are limited to workflow fields; direct client creation of order documents is denied.
 
 ## Known limits / before production
-- Existing product documents may still contain `purchasePrice`, `minPricePcs`, and `minPriceCtn`. Firestore rules cannot hide individual fields within a readable document, so these fields must be migrated to a separate admin-only collection before production. Do not assume client-side field removal protects them.
+- Deployment/migration sequence matters: deploy the callable and admin UI, sign in as an administrator, use Admin > Products > “Migrate legacy private price fields”, verify completion, and only then deploy the hardened Firestore rules. Until migration completes, legacy fields in existing product documents may still be readable by clients. Back up Firestore first.
+- The migration is admin-only and safe to rerun, but verify the reported counts and sample documents before tightening rules.
 - Stock is checked at order submission and again when staff accepts the order, but it is not reserved at submission time.
 - Order alerts are in-app (sound, badge, tab title) while the admin page is open. No push or email yet.
 - Run build, function checks, and Firebase Emulator security-rule tests before deploying.
