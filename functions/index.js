@@ -14,7 +14,7 @@ exports.createStaff=onCall(opt,async req=>{await guard(req);
   const {name,email,phone='',role}=req.data||{};
   if(typeof name!=='string'||!name.trim()||name.trim().length>100)
     throw new HttpsError('invalid-argument','Name must be 1–100 characters.');
-  if(typeof email!=='string'||email.trim().length>254||!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email.trim()))
+  if(typeof email!=='string'||email.trim().length>254||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()))
     throw new HttpsError('invalid-argument','A valid email address is required.');
   if(typeof phone!=='string'||phone.length>30)
     throw new HttpsError('invalid-argument','Phone must be a text value up to 30 characters.');
