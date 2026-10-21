@@ -12,10 +12,34 @@ async function guard(req){
 }
 exports.createStaff=onCall(opt,async req=>{await guard(req);
   const {name,email,phone='',role}=req.data||{};
-  if(!name||!email||!['staff','admin'].includes(role))throw new HttpsError('invalid-argument','Name, email and role are required.');
-  const u=await admin.auth().createUser({email,displayName:name,password:crypto.randomBytes(16).toString('base64url')});
-  await db.doc(`users/${u.uid}`).set({name,email,phone,role,active:true,createdAt:admin.firestore.FieldValue.serverTimestamp()});
-  return {uid:u.uid,link:await admin.auth().generatePasswordResetLink(email)};
+  if(typeof name!=='string'||!name.trim()||name.trim().length>100)
+    throw new HttpsError('invalid-argument','Name must be 1–100 characters.');
+  if(typeof email!=='string'||email.trim().length>254||!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email.trim()))
+    throw new HttpsError('invalid-argument','A valid email address is required.');
+  if(typeof phone!=='string'||phone.length>30)
+    throw new HttpsError('invalid-argument','Phone must be a text value up to 30 characters.');
+  if(!['staff','admin'].includes(role))
+    throw new HttpsError('invalid-argument','A valid staff role is required.');
+  const cleanName=name.trim();
+  const cleanEmail=email.trim().toLowerCase();
+  const cleanPhone=phone.trim();
+  let u;
+  try{
+    u=await admin.auth().createUser({email:cleanEmail,displayName:cleanName,password:crypto.randomBytes(32).toString('base64url')});
+    await db.doc(`users/${u.uid}`).create({name:cleanName,email:cleanEmail,phone:cleanPhone,role,active:true,createdAt:admin.firestore.FieldValue.serverTimestamp()});
+    const link=await admin.auth().generatePasswordResetLink(cleanEmail);
+    return {uid:u.uid,link};
+  }catch(e){
+    if(u){
+      try{await db.doc(`users/${u.uid}`).delete();}catch(cleanupError){console.error('Failed to clean up staff profile after creation failure.',cleanupError);}
+      try{await admin.auth().deleteUser(u.uid);}catch(cleanupError){console.error('Failed to clean up Auth account after creation failure.',cleanupError);}
+    }
+    if(e instanceof HttpsError)throw e;
+    if(e.code==='auth/email-already-exists')
+      throw new HttpsError('already-exists','An account with this email already exists.');
+    console.error('Staff account creation failed.',e);
+    throw new HttpsError('internal','Could not create the staff account. Please retry.');
+  }
 });
 exports.setStaffActive=onCall(opt,async req=>{await guard(req);
   const {uid,active}=req.data||{};
