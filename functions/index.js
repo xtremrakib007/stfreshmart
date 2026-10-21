@@ -73,14 +73,20 @@ exports.createOrder=onCall({...opt, enforceAppCheck:false},async req=>{
     if(!Number.isFinite(stock)||stock<qty)
       throw new HttpsError('failed-precondition',`Insufficient stock for ${p.name||sku}.`);
     let unitPrice=Number(p.retailPrice);
+    let hasStaffPrice=false;
     if(role!=='customer'){
       const staffSnap=await db.doc(`staffPrices/${productSnap.id}`).get();
-      if(staffSnap.exists&&Number.isFinite(Number(staffSnap.data().price)))unitPrice=Number(staffSnap.data().price);
+      if(staffSnap.exists&&Number.isFinite(Number(staffSnap.data().price))){
+        unitPrice=Number(staffSnap.data().price);
+        hasStaffPrice=true;
+      }
     }
-    const slabs=Array.isArray(p.priceSlabs)?p.priceSlabs.filter(s=>Number(s.minQty)>0&&Number(s.price)>0).sort((a,b)=>Number(b.minQty)-Number(a.minQty)):[];
-    const slab=slabs.find(s=>qty>=Number(s.minQty));
-    if(slab)unitPrice=Number(slab.price);
-    else if(Number(p.promoPrice)>0)unitPrice=Number(p.promoPrice);
+    if(!hasStaffPrice){
+      const slabs=Array.isArray(p.priceSlabs)?p.priceSlabs.filter(s=>Number(s.minQty)>0&&Number(s.price)>0).sort((a,b)=>Number(b.minQty)-Number(a.minQty)):[];
+      const slab=slabs.find(s=>qty>=Number(s.minQty));
+      if(slab)unitPrice=Number(slab.price);
+      else if(Number(p.promoPrice)>0)unitPrice=Number(p.promoPrice);
+    }
     if(!Number.isFinite(unitPrice)||unitPrice<0)
       throw new HttpsError('failed-precondition',`Price is not configured for ${p.name||sku}.`);
     lines.push({sku:productSnap.id,name:String(p.name||sku).slice(0,200),unit:String(p.unit||'PCS').slice(0,30),qty,price:unitPrice});
