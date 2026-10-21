@@ -66,9 +66,20 @@ exports.setStaffActive=onCall(opt,async req=>{await guard(req);
   return {ok:true};
 });
 exports.resetStaffPassword=onCall(opt,async req=>{await guard(req);
-  const u=await admin.auth().getUser(req.data.uid);return {link:await admin.auth().generatePasswordResetLink(u.email)};
+  const data=req.data||{};
+  if(typeof data.uid!=='string'||!data.uid.trim()||data.uid.trim().length>128)
+    throw new HttpsError('invalid-argument','A valid staff user ID is required.');
+  const uid=data.uid.trim();
+  const profile=await db.doc(`users/${uid}`).get();
+  if(!profile.exists||!['staff','admin'].includes(profile.data().role))
+    throw new HttpsError('not-found','Staff account not found.');
+  let user;
+  try{user=await admin.auth().getUser(uid);}
+  catch(e){if(e.code==='auth/user-not-found')throw new HttpsError('not-found','Staff authentication account not found.');throw e;}
+  if(!user.email)throw new HttpsError('failed-precondition','This staff account has no email address for password recovery.');
+  try{return {link:await admin.auth().generatePasswordResetLink(user.email)};}
+  catch(e){console.error('Staff password reset link generation failed.',e);throw new HttpsError('internal','Could not generate a password reset link.');}
 });
-
 // All customer order prices are recalculated here. The browser submits only product IDs and quantities.
 exports.createOrder=onCall({...opt, enforceAppCheck:false},async req=>{
   const data=req.data||{};
