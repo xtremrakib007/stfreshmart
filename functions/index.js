@@ -123,8 +123,9 @@ exports.migratePrivateProductFields=onCall(opt,async req=>{
   await guard(req);
   const snap=await db.collection('products').get();
   let migrated=0;
-  for(let start=0;start<snap.docs.length;start+=400){
-    const docs=snap.docs.slice(start,start+400);
+  for(let start=0;start<snap.docs.length;start+=200){
+    // Each migrated product can require two writes; stay below Firestore's 500-write batch limit.
+    const docs=snap.docs.slice(start,start+200);
     const batch=db.batch();
     for(const product of docs){
       const p=product.data();
