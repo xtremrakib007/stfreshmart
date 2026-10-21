@@ -18,7 +18,10 @@ export function Orders({orders}:{orders:any[]}){
       const oref=doc(db,'orders',o.id);const cur=(await t.get(oref)).data()!;
       const deduct=to==='Accepted'&&!cur.stockDeducted,restore=to==='Cancelled'&&cur.stockDeducted;
       const snaps=deduct||restore?await Promise.all(cur.items.map((i:any)=>t.get(doc(db,'products',i.sku)))):[];
-      snaps.forEach((s,idx)=>{if(!s.exists())return;const i=cur.items[idx],from=s.data()!.stock,next=Math.max(0,from+(deduct?-i.qty:i.qty));
+      snaps.forEach((s,idx)=>{if(!s.exists())throw new Error('Product no longer exists.');
+        const i=cur.items[idx],from=Number(s.data()!.stock||0);
+        if(deduct&&from<i.qty)throw new Error(`Insufficient stock for ${i.name||i.sku}.`);
+        const next=from+(deduct?-i.qty:i.qty);
         t.update(s.ref,{stock:next});t.set(doc(collection(db,'inventoryHistory')),{sku:i.sku,from,to:next,reason:deduct?`order ${o.id}`:`cancel ${o.id}`,at:new Date()})});
       t.update(oref,{status:to,...(deduct?{stockDeducted:true}:{}),...(restore?{stockDeducted:false}:{})});
     })}catch{setErr('Could not update this order. Try again.')}
