@@ -215,8 +215,8 @@ exports.updateOrderStatus=onCall(opt,async req=>{
   if(!userSnap.exists||userSnap.data().active!==true||!['staff','admin'].includes(userSnap.data().role))
     throw new HttpsError('permission-denied','Active staff access required.');
   const {orderId,to}=req.data||{};
-  if(typeof orderId!=='string'||!orderId||typeof to!=='string')
-    throw new HttpsError('invalid-argument','Order and target status are required.');
+  if(typeof orderId!=='string'||! /^[A-Za-z0-9_-]{1,128}$/.test(orderId)||typeof to!=='string')
+    throw new HttpsError('invalid-argument','A valid order ID and target status are required.');
   const allowed={
     Pending:['Accepted','Cancelled'],
     Accepted:['Preparing','Cancelled'],
@@ -240,7 +240,7 @@ exports.updateOrderStatus=onCall(opt,async req=>{
     const quantities=new Map();
     if(deduct||restore){
       for(const item of items){
-        if(!item||typeof item.sku!=='string'||!item.sku.trim())
+        if(!item||typeof item.sku!=='string'||! /^[A-Za-z0-9._-]{1,100}$/.test(item.sku.trim()))
           throw new HttpsError('failed-precondition','Order contains an invalid product SKU.');
         const sku=item.sku.trim().toUpperCase(),qty=Number(item.qty);
         if(!Number.isInteger(qty)||qty<1||qty>100000)
@@ -261,9 +261,10 @@ exports.updateOrderStatus=onCall(opt,async req=>{
         if(!snap.exists)
           throw new HttpsError('failed-precondition',`Order product ${sku} no longer exists.`);
         const stock=Number(snap.data().stock);
-        if(!Number.isFinite(stock)||stock<0||(deduct&&stock<qty))
+        const nextStock=stock+(deduct?-qty:qty);
+        if(!Number.isFinite(stock)||stock<0||(deduct&&stock<qty)||!Number.isFinite(nextStock)||nextStock<0)
           throw new HttpsError('failed-precondition',`Insufficient or invalid stock for ${snap.data().name||sku}.`);
-        changes.push({ref:snap.ref,sku,from:stock,to:stock+(deduct?-qty:qty)});
+        changes.push({ref:snap.ref,sku,from:stock,to:nextStock});
       }
     }
     for(const c of changes){
