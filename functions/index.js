@@ -173,18 +173,34 @@ exports.updateOrderStatus=onCall(opt,async req=>{
     const items=Array.isArray(order.items)?order.items:[];
     if((deduct||restore)&&(!items.length||items.length>100))
       throw new HttpsError('failed-precondition','Order items are invalid.');
-    const refs=items.map(i=>db.doc(`products/${String(i.sku).toUpperCase()}`));
+    // Aggregate by SKU so duplicate lines cannot overwrite each other's stock updates.
+    const quantities=new Map();
+    if(deduct||restore){
+      for(const item of items){
+        if(!item||typeof item.sku!=='string'||!item.sku.trim())
+          throw new HttpsError('failed-precondition','Order contains an invalid product SKU.');
+        const sku=item.sku.trim().toUpperCase(),qty=Number(item.qty);
+        if(!Number.isInteger(qty)||qty<1||qty>100000)
+          throw new HttpsError('failed-precondition','Order contains an invalid quantity.');
+        const combined=(quantities.get(sku)||0)+qty;
+        if(!Number.isSafeInteger(combined)||combined>100000)
+          throw new HttpsError('failed-precondition','Combined product quantity is invalid.');
+        quantities.set(sku,combined);
+      }
+    }
+    const entries=[...quantities.entries()];
+    const refs=entries.map(([sku])=>db.doc(`products/${sku}`));
     const snaps=(deduct||restore)?await Promise.all(refs.map(ref=>tx.get(ref))):[];
     const changes=[];
     if(deduct||restore){
       for(let i=0;i<snaps.length;i++){
-        const snap=snaps[i],item=items[i],qty=Number(item.qty);
-        if(!snap.exists||!Number.isInteger(qty)||qty<1)
-          throw new HttpsError('failed-precondition','Order contains an invalid or missing product.');
+        const snap=snaps[i],[sku,qty]=entries[i];
+        if(!snap.exists)
+          throw new HttpsError('failed-precondition',`Order product ${sku} no longer exists.`);
         const stock=Number(snap.data().stock);
         if(!Number.isFinite(stock)||stock<0||(deduct&&stock<qty))
-          throw new HttpsError('failed-precondition',`Insufficient or invalid stock for ${item.name||item.sku}.`);
-        changes.push({ref:snap.ref,sku:item.sku,from:stock,to:stock+(deduct?-qty:qty)});
+          throw new HttpsError('failed-precondition',`Insufficient or invalid stock for ${snap.data().name||sku}.`);
+        changes.push({ref:snap.ref,sku,from:stock,to:stock+(deduct?-qty:qty)});
       }
     }
     for(const c of changes){
