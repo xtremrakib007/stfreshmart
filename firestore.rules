@@ -69,7 +69,13 @@ service cloud.firestore {
       // Guest checkout is intentionally supported. Validate the shape here;
       // authoritative pricing and stock checks must also be performed server-side.
       allow create: if false; // Orders must be created by the trusted createOrder callable.
-      allow read, update: if isStaff();
+      allow read: if isStaff();
+      allow update: if isStaff()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'stockDeducted'])
+        && request.resource.data.status in [
+          'Pending', 'Accepted', 'Preparing', 'Ready',
+          'Out For Delivery', 'Delivered', 'Cancelled'
+        ];
       allow delete: if isAdmin();
     }
     match /priceHistory/{id} {
