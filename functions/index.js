@@ -123,8 +123,8 @@ exports.createOrder=onCall({...opt, enforceAppCheck:false},async req=>{
   const lines=[];
   for(const [sku,rawQty] of Object.entries(requested)){
     if(typeof sku!=='string'||! /^[A-Za-z0-9._-]{1,100}$/.test(sku)) throw new HttpsError('invalid-argument','Invalid product SKU.');
-    const qty=Number(rawQty);
-    if(!Number.isInteger(qty)||qty<1||qty>100000)
+    const qty=rawQty;
+    if(typeof qty!=='number'||!Number.isSafeInteger(qty)||qty<1||qty>100000)
       throw new HttpsError('invalid-argument',`Invalid quantity for ${sku}.`);
     const productSnap=await db.doc(`products/${String(sku).toUpperCase()}`).get();
     if(!productSnap.exists)throw new HttpsError('failed-precondition',`Product ${sku} is unavailable.`);
