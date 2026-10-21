@@ -25,27 +25,46 @@ export function Products(){
   };
 
   async function edit(p:any){
-    const s=await getDoc(doc(db,'staffPrices',p.id));
-    const sp=s.data()?.price??0;
+    const [staffSnap,privateSnap]=await Promise.all([
+      getDoc(doc(db,'staffPrices',p.id)),
+      role==='admin'?getDoc(doc(db,'productPrivate',p.id)):Promise.resolve(null)
+    ]);
+    const sp=staffSnap.data()?.price??0;
+    const privateData=privateSnap?.exists()?privateSnap.data():{};
     setF({
       ...p,
       staffPrice:sp,
       promoPrice:p.promoPrice??0,
       priceSlabs:Array.isArray(p.priceSlabs)?p.priceSlabs:[],
-      purchasePrice:p.purchasePrice??0,
-      minPricePcs:p.minPricePcs??0,
-      minPriceCtn:p.minPriceCtn??0
+      purchasePrice:privateData?.purchasePrice??0,
+      minPricePcs:privateData?.minPricePcs??0,
+      minPriceCtn:privateData?.minPriceCtn??0
     });
     setOld({stock:p.stock,retail:p.retailPrice,staff:sp});
   }
   async function save(){
     if(!f.sku.trim()||!f.name.trim()){setMsg('SKU and name are required.');return}
     if(f.retailPrice<0||f.staffPrice<0||f.stock<0){setMsg('Prices and stock cannot be negative.');return}
-    try{const id=f.sku.trim().toUpperCase();const {staffPrice,...p}=f;
-      const cleanSlabs = (p.priceSlabs||[]).filter((s:any)=>s.minQty>0&&s.price>0).sort((a:any,b:any)=>a.minQty-b.minQty);
-      await setDoc(doc(db,'products',id),{...p,priceSlabs:cleanSlabs,sku:id,status:p.status||'active'});await setDoc(doc(db,'staffPrices',id),{price:staffPrice});
-      if(!old||old.retail!==p.retailPrice||old.staff!==staffPrice)await setDoc(doc(collection(db,'priceHistory')),{sku:id,retailPrice:p.retailPrice,staffPrice,at:new Date()});
-      if(!old||old.stock!==p.stock)await setDoc(doc(collection(db,'inventoryHistory')),{sku:id,from:old?.stock??0,to:p.stock,reason:'manual',at:new Date()});
+    try{
+      const id=f.sku.trim().toUpperCase();
+      const {staffPrice,purchasePrice,minPricePcs,minPriceCtn,...publicProduct}=f;
+      const cleanSlabs=(publicProduct.priceSlabs||[])
+        .filter((s:any)=>Number.isFinite(Number(s.minQty))&&Number(s.minQty)>0&&Number.isFinite(Number(s.price))&&Number(s.price)>0)
+        .sort((a:any,b:any)=>a.minQty-b.minQty);
+      const productData={...publicProduct,priceSlabs:cleanSlabs,sku:id,status:publicProduct.status||'active'};
+      await setDoc(doc(db,'products',id),productData);
+      await setDoc(doc(db,'staffPrices',id),{price:staffPrice});
+      if(role==='admin'){
+        await setDoc(doc(db,'productPrivate',id),{
+          purchasePrice:Number(purchasePrice)||0,
+          minPricePcs:Number(minPricePcs)||0,
+          minPriceCtn:Number(minPriceCtn)||0
+        });
+      }
+      if(!old||old.retail!==productData.retailPrice||old.staff!==staffPrice)
+        await setDoc(doc(collection(db,'priceHistory')),{sku:id,retailPrice:productData.retailPrice,staffPrice,at:new Date()});
+      if(!old||old.stock!==productData.stock)
+        await setDoc(doc(collection(db,'inventoryHistory')),{sku:id,from:old?.stock??0,to:productData.stock,reason:'manual',at:new Date()});
       setF(blank);setOld(null);setMsg('Product saved.');
     }catch{setMsg('Could not save. Check your connection and permissions.')}
   }
