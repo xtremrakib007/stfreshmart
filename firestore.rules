@@ -87,7 +87,20 @@ service cloud.firestore {
     }
     match /inventoryHistory/{id} {
       allow read: if isStaff();
-      allow create, update, delete: if false; // Trusted functions write inventory history.
+      // Admins can record manual stock edits from the product editor; order-driven
+      // stock changes are written atomically by updateOrderStatus using Admin SDK.
+      allow create: if isAdmin()
+        && request.resource.data.keys().hasOnly(['sku', 'from', 'to', 'reason', 'at'])
+        && request.resource.data.sku is string
+        && request.resource.data.sku.size() > 0
+        && request.resource.data.sku.size() <= 100
+        && request.resource.data.from is number
+        && request.resource.data.from >= 0
+        && request.resource.data.to is number
+        && request.resource.data.to >= 0
+        && request.resource.data.reason == 'manual'
+        && request.resource.data.at == request.time;
+      allow update, delete: if false;
     }
     match /banners/{id} {
       allow read: if true;
