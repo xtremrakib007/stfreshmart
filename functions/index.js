@@ -115,3 +115,32 @@ exports.createOrder=onCall({...opt, enforceAppCheck:false},async req=>{
   const ref=await db.collection('orders').add(order);
   return {orderId:ref.id,lines,total,currency,message};
 });
+
+
+// One-time admin migration: move legacy private pricing fields out of readable product documents.
+// Safe to rerun; existing private values are merged before legacy fields are deleted.
+exports.migratePrivateProductFields=onCall(opt,async req=>{
+  await guard(req);
+  const snap=await db.collection('products').get();
+  let migrated=0;
+  for(let start=0;start<snap.docs.length;start+=400){
+    const docs=snap.docs.slice(start,start+400);
+    const batch=db.batch();
+    for(const product of docs){
+      const p=product.data();
+      const privateData={};
+      for(const key of ['purchasePrice','minPricePcs','minPriceCtn']){
+        if(Object.prototype.hasOwnProperty.call(p,key)&&p[key]!==undefined)privateData[key]=p[key];
+      }
+      if(Object.keys(privateData).length){
+        batch.set(db.doc(`productPrivate/${product.id}`),privateData,{merge:true});
+        const remove={};
+        for(const key of Object.keys(privateData))remove[key]=admin.firestore.FieldValue.delete();
+        batch.update(product.ref,remove);
+        migrated++;
+      }
+    }
+    await batch.commit();
+  }
+  return {scanned:snap.size,migrated,message:'Private product fields migrated and removed from public product documents.'};
+});
