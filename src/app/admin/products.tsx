@@ -55,7 +55,8 @@ export function Products(){
   }
   async function save(){
     if(!f.sku.trim()||!f.name.trim()){setMsg('SKU and name are required.');return}
-    if(f.retailPrice<0||f.staffPrice<0||f.stock<0){setMsg('Prices and stock cannot be negative.');return}
+    const numericFields=['stock','retailPrice','promoPrice','staffPrice','purchasePrice','minPricePcs','minPriceCtn'];
+    if(numericFields.some(key=>!Number.isFinite(Number(f[key]))||Number(f[key])<0)){setMsg('Enter valid non-negative numbers for all prices and stock.');return}
     try{
       const id=f.sku.trim().toUpperCase();
       const {staffPrice,purchasePrice,minPricePcs,minPriceCtn,...publicProduct}=f;
