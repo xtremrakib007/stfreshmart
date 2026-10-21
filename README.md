@@ -3,10 +3,13 @@
 ## Go-live steps
 1. Create a Firebase project. Set Firestore and Storage location to `asia-southeast1` (Singapore, closest to Perak). Enable Email/Password sign-in. Upgrade to Blaze (Cloud Functions needs it; light use costs very little).
 2. `npm i` and `cd functions && npm i && cd ..`. Copy `.env.example` to `.env.local` and fill in the web app keys.
-3. `firebase use --add`, then `npm run deploy` (builds the site and deploys hosting, Firestore rules, Storage rules and functions).
-4. Create the first admin by hand: add a user in Firebase Auth, then a Firestore doc `users/<uid>` with `{name, email, role:"admin", active:true}`. After that, add all other staff from Admin > Staff.
-5. Open Admin > Settings: set company name, logo and WhatsApp number (e.g. 60123456789).
-6. Admin > Import: upload your Excel price list. Then add photos in Admin > Products.
+3. `firebase use --add`, then run `npm run build` and `firebase deploy --only functions,hosting,storage` first. **Do not deploy Firestore rules yet**; the legacy private-price migration must run before the hardened rules are applied.
+4. In Firebase Console, export/back up Firestore data before migration. Sign in as an administrator, open Admin > Products, run “Migrate legacy private price fields”, and verify the counts and sample product documents.
+5. Only after migration succeeds, deploy the hardened Firestore rules with `firebase deploy --only firestore:rules`.
+6. Verify customer checkout, staff order workflow, admin product editing, and that customer/staff accounts cannot read `productPrivate` documents.
+7. Create the first admin by hand: add a user in Firebase Auth, then a Firestore doc `users/<uid>` with `{name, email, role:"admin", active:true}`. After that, add all other staff from Admin > Staff.
+8. Open Admin > Settings: set company name, logo and WhatsApp number (e.g. 60123456789).
+9. Admin > Import: upload your Excel price list. Then add photos in Admin > Products.
 
 ## How it is secured
 - Staff prices are in `staffPrices/{sku}`; rules allow only active staff/admin to read them.
