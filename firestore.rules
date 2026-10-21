@@ -68,7 +68,7 @@ service cloud.firestore {
     match /orders/{id} {
       // Guest checkout is intentionally supported. Validate the shape here;
       // authoritative pricing and stock checks must also be performed server-side.
-      allow create: if validCustomerOrder();
+      allow create: if false; // Orders must be created by the trusted createOrder callable.
       allow read, update: if isStaff();
       allow delete: if isAdmin();
     }
