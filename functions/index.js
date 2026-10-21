@@ -1,5 +1,6 @@
 const {onCall,HttpsError}=require('firebase-functions/v2/https');
 const admin=require('firebase-admin');
+const {FieldValue}=require('firebase-admin/firestore');
 const crypto=require('crypto');
 admin.initializeApp();
 const opt={region:'asia-southeast1'};
@@ -26,7 +27,7 @@ exports.createStaff=onCall(opt,async req=>{await guard(req);
   let u;
   try{
     u=await admin.auth().createUser({email:cleanEmail,displayName:cleanName,password:crypto.randomBytes(32).toString('base64url')});
-    await db.doc(`users/${u.uid}`).create({name:cleanName,email:cleanEmail,phone:cleanPhone,role,active:true,createdAt:admin.firestore.FieldValue.serverTimestamp()});
+    await db.doc(`users/${u.uid}`).create({name:cleanName,email:cleanEmail,phone:cleanPhone,role,active:true,createdAt:FieldValue.serverTimestamp()});
     const link=await admin.auth().generatePasswordResetLink(cleanEmail);
     return {uid:u.uid,link};
   }catch(e){
@@ -173,7 +174,7 @@ exports.createOrder=onCall({...opt, enforceAppCheck:false},async req=>{
     `Verified total: ${currency}${total.toFixed(2)}`,
     cleanDelivery.instructions||cleanDelivery.notes||''
   ].filter(Boolean).join('\n');
-  const order={customer:{name:customer.name.trim(),phone:customer.phone.trim(),company:(customer.company||'').trim()},method,delivery:cleanDelivery,items:lines,total,status:'Pending',placedBy:role,message,createdAt:admin.firestore.FieldValue.serverTimestamp()};
+  const order={customer:{name:customer.name.trim(),phone:customer.phone.trim(),company:(customer.company||'').trim()},method,delivery:cleanDelivery,items:lines,total,status:'Pending',placedBy:role,message,createdAt:FieldValue.serverTimestamp()};
   const ref=await db.collection('orders').add(order);
   return {orderId:ref.id,lines,total,currency,message};
 });
@@ -198,7 +199,7 @@ exports.migratePrivateProductFields=onCall(opt,async req=>{
       if(Object.keys(privateData).length){
         batch.set(db.doc(`productPrivate/${product.id}`),privateData,{merge:true});
         const remove={};
-        for(const key of Object.keys(privateData))remove[key]=admin.firestore.FieldValue.delete();
+        for(const key of Object.keys(privateData))remove[key]=FieldValue.delete();
         batch.update(product.ref,remove);
         migrated++;
       }
@@ -271,7 +272,7 @@ exports.updateOrderStatus=onCall(opt,async req=>{
       tx.update(c.ref,{stock:c.to});
       tx.set(db.collection('inventoryHistory').doc(),{
         sku:c.sku,from:c.from,to:c.to,reason:deduct?`order ${orderId}`:`cancel ${orderId}`,
-        at:admin.firestore.FieldValue.serverTimestamp(),changedBy:req.auth.uid
+        at:FieldValue.serverTimestamp(),changedBy:req.auth.uid
       });
     }
     tx.update(orderRef,{status:to,...(deduct?{stockDeducted:true}:{}),...(restore?{stockDeducted:false}:{})});

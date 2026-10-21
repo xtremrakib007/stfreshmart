@@ -27,3 +27,8 @@
 - Stock is checked at order submission and atomically rechecked/deducted when staff accepts the order. Stock is not reserved at submission time, so orders can be rejected at acceptance if another order uses the stock first.
 - Order alerts are in-app (sound, badge, tab title) while the admin page is open. No push or email yet.
 - Run build, function checks, and Firebase Emulator security-rule tests before deploying.
+
+## Tests
+- Source checks: `cd functions && npm run test:security`.
+- Emulator tests (Firestore rules, Storage rules and all Cloud Functions against the Firebase Emulator Suite): `cd emulator-tests && npm install && npm test`. Requires Node 22 and Java 11+. Uses the offline `demo-stfreshmart` project, so no real Firebase data is touched.
+- Behind an HTTP(S) proxy, the Firebase CLI routes the Storage emulator's Firestore lookups through the proxy, so the admin image-upload test is skipped there. Run without a proxy to cover it.

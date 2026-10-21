@@ -1,0 +1,14 @@
+{
+  "name": "emulator-tests",
+  "private": true,
+  "description": "Firebase Emulator tests for Firestore rules, Storage rules and Cloud Functions.",
+  "scripts": {
+    "test": "firebase emulators:exec --project demo-stfreshmart --config ../firebase.json --only auth,firestore,functions,storage \"node --test --test-concurrency=1 rules.test.js functions.test.js\""
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.2",
+    "firebase": "^12.19.0",
+    "firebase-admin": "^12.7.0",
+    "firebase-tools": "^15.34.0"
+  }
+}

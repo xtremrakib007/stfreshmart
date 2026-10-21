@@ -1,0 +1,215 @@
+'use strict';
+const {test,beforeEach,describe}=require('node:test');
+const assert=require('node:assert/strict');
+const {db,auth,resetEmulators,createUser,call}=require('./helpers');
+
+const pickup={date:'2026-11-01',time:'10:00',collector:'Ali'};
+const customer={name:'Test Customer',phone:'0123456789',company:''};
+const orderData=(items,extra={})=>({customer,method:'SELF PICKUP',delivery:pickup,items,...extra});
+
+let adminToken,staffToken,inactiveStaffToken,inactiveAdminToken,customerToken;
+
+beforeEach(async()=>{
+  await resetEmulators();
+  adminToken=await createUser('admin',{role:'admin',active:true});
+  staffToken=await createUser('staff',{role:'staff',active:true});
+  inactiveStaffToken=await createUser('inactiveStaff',{role:'staff',active:false});
+  inactiveAdminToken=await createUser('inactiveAdmin',{role:'admin',active:false});
+  customerToken=await createUser('customer');
+  await db.doc('products/RICE5').set({name:'Rice 5kg',unit:'BAG',status:'active',retailPrice:20,stock:50,
+    priceSlabs:[{minQty:10,price:18},{minQty:30,price:16}]});
+  await db.doc('products/OIL1').set({name:'Oil 1L',unit:'BTL',status:'active',retailPrice:8,promoPrice:7,stock:5});
+  await db.doc('products/HIDDEN').set({name:'Hidden',status:'inactive',retailPrice:5,stock:100});
+  await db.doc('staffPrices/RICE5').set({price:15});
+});
+
+const errorStatus=r=>r.error&&r.error.status;
+const stock=async sku=>(await db.doc(`products/${sku}`).get()).data().stock;
+
+describe('createOrder',()=>{
+  test('prices guest orders on the server and ignores client-supplied totals',async()=>{
+    const r=await call('createOrder',orderData({RICE5:2,OIL1:1},{total:0,prices:{RICE5:0}}));
+    assert.equal(r.result.total,2*20+7);
+    const order=(await db.doc(`orders/${r.result.orderId}`).get()).data();
+    assert.equal(order.total,47);
+    assert.equal(order.status,'Pending');
+    assert.equal(order.placedBy,'customer');
+    assert.deepEqual(order.items.map(i=>[i.sku,i.qty,i.price]),[['RICE5',2,20],['OIL1',1,7]]);
+  });
+
+  test('applies the highest matching quantity price slab',async()=>{
+    assert.equal((await call('createOrder',orderData({RICE5:10}))).result.total,180);
+    assert.equal((await call('createOrder',orderData({RICE5:30}))).result.total,480);
+  });
+
+  test('uses staff prices only for active staff',async()=>{
+    assert.equal((await call('createOrder',orderData({RICE5:2}),staffToken)).result.total,30);
+    assert.equal((await call('createOrder',orderData({RICE5:2}),inactiveStaffToken)).result.total,40);
+    assert.equal((await call('createOrder',orderData({RICE5:2}),customerToken)).result.total,40);
+  });
+
+  test('does not deduct stock when an order is placed',async()=>{
+    await call('createOrder',orderData({RICE5:5}));
+    assert.equal(await stock('RICE5'),50);
+  });
+
+  test('customers cannot order inactive products, active staff can',async()=>{
+    assert.equal(errorStatus(await call('createOrder',orderData({HIDDEN:1}))),'FAILED_PRECONDITION');
+    assert.ok((await call('createOrder',orderData({HIDDEN:1}),staffToken)).result);
+  });
+
+  test('rejects orders above available stock',async()=>{
+    assert.equal(errorStatus(await call('createOrder',orderData({OIL1:6}))),'FAILED_PRECONDITION');
+  });
+
+  test('rejects invalid quantities',async()=>{
+    for(const qty of ['5',1.5,0,-1,100001,null])
+      assert.equal(errorStatus(await call('createOrder',orderData({RICE5:qty}))),'INVALID_ARGUMENT',`qty ${qty}`);
+  });
+
+  test('rejects malformed and case-duplicate SKUs',async()=>{
+    assert.equal(errorStatus(await call('createOrder',orderData({'RICE5/../x':1}))),'INVALID_ARGUMENT');
+    assert.equal(errorStatus(await call('createOrder',orderData({RICE5:1,rice5:1}))),'INVALID_ARGUMENT');
+    assert.equal(errorStatus(await call('createOrder',orderData({}))),'INVALID_ARGUMENT');
+    assert.equal(errorStatus(await call('createOrder',orderData(['RICE5']))),'INVALID_ARGUMENT');
+  });
+
+  test('requires delivery details for the chosen method',async()=>{
+    assert.equal(errorStatus(await call('createOrder',{customer,method:'SELF PICKUP',delivery:{},items:{RICE5:1}})),'INVALID_ARGUMENT');
+    assert.equal(errorStatus(await call('createOrder',{customer,method:'STANDARD DELIVERY',delivery:{date:'2026-11-01'},items:{RICE5:1}})),'INVALID_ARGUMENT');
+    assert.equal(errorStatus(await call('createOrder',{customer,method:'FREE DELIVERY',delivery:pickup,items:{RICE5:1}})),'INVALID_ARGUMENT');
+    assert.equal(errorStatus(await call('createOrder',{customer:{name:'',phone:'1'},method:'SELF PICKUP',delivery:pickup,items:{RICE5:1}})),'INVALID_ARGUMENT');
+  });
+});
+
+describe('updateOrderStatus',()=>{
+  const placeOrder=async items=>(await db.collection('orders').add({status:'Pending',items,total:0})).id;
+
+  test('rejects signed-out users, customers and inactive staff',async()=>{
+    const id=await placeOrder([{sku:'RICE5',qty:1}]);
+    assert.equal(errorStatus(await call('updateOrderStatus',{orderId:id,to:'Accepted'})),'UNAUTHENTICATED');
+    assert.equal(errorStatus(await call('updateOrderStatus',{orderId:id,to:'Accepted'},customerToken)),'PERMISSION_DENIED');
+    assert.equal(errorStatus(await call('updateOrderStatus',{orderId:id,to:'Accepted'},inactiveStaffToken)),'PERMISSION_DENIED');
+    assert.equal((await db.doc(`orders/${id}`).get()).data().status,'Pending');
+  });
+
+  test('accepting deducts stock and records history; cancelling restores it',async()=>{
+    const id=await placeOrder([{sku:'RICE5',qty:3},{sku:'OIL1',qty:2}]);
+    assert.ok((await call('updateOrderStatus',{orderId:id,to:'Accepted'},staffToken)).result);
+    assert.equal(await stock('RICE5'),47);
+    assert.equal(await stock('OIL1'),3);
+    const order=(await db.doc(`orders/${id}`).get()).data();
+    assert.equal(order.status,'Accepted');
+    assert.equal(order.stockDeducted,true);
+    const history=(await db.collection('inventoryHistory').get()).docs.map(d=>d.data());
+    assert.equal(history.length,2);
+    assert.ok(history.every(h=>h.reason===`order ${id}`&&h.changedBy==='staff'));
+
+    assert.ok((await call('updateOrderStatus',{orderId:id,to:'Cancelled'},staffToken)).result);
+    assert.equal(await stock('RICE5'),50);
+    assert.equal(await stock('OIL1'),5);
+    assert.equal((await db.doc(`orders/${id}`).get()).data().stockDeducted,false);
+  });
+
+  test('combines duplicate SKU lines before deducting stock',async()=>{
+    const id=await placeOrder([{sku:'RICE5',qty:2},{sku:'rice5',qty:3}]);
+    assert.ok((await call('updateOrderStatus',{orderId:id,to:'Accepted'},staffToken)).result);
+    assert.equal(await stock('RICE5'),45);
+  });
+
+  test('refuses acceptance without enough stock and changes nothing',async()=>{
+    const id=await placeOrder([{sku:'RICE5',qty:2},{sku:'OIL1',qty:6}]);
+    assert.equal(errorStatus(await call('updateOrderStatus',{orderId:id,to:'Accepted'},staffToken)),'FAILED_PRECONDITION');
+    assert.equal(await stock('RICE5'),50);
+    assert.equal((await db.doc(`orders/${id}`).get()).data().status,'Pending');
+    assert.equal((await db.collection('inventoryHistory').get()).size,0);
+  });
+
+  test('allows only valid status transitions',async()=>{
+    const id=await placeOrder([{sku:'RICE5',qty:1}]);
+    assert.equal(errorStatus(await call('updateOrderStatus',{orderId:id,to:'Delivered'},staffToken)),'FAILED_PRECONDITION');
+    for(const to of ['Accepted','Preparing','Ready','Out For Delivery','Delivered'])
+      assert.ok((await call('updateOrderStatus',{orderId:id,to},staffToken)).result,to);
+    assert.equal(errorStatus(await call('updateOrderStatus',{orderId:id,to:'Cancelled'},staffToken)),'FAILED_PRECONDITION');
+    assert.equal(await stock('RICE5'),49);
+  });
+
+  test('rejects invalid order IDs and invalid stored items',async()=>{
+    assert.equal(errorStatus(await call('updateOrderStatus',{orderId:'a/b',to:'Accepted'},staffToken)),'INVALID_ARGUMENT');
+    assert.equal(errorStatus(await call('updateOrderStatus',{orderId:'missing',to:'Accepted'},staffToken)),'NOT_FOUND');
+    const id=await placeOrder([{sku:'../users/admin',qty:1}]);
+    assert.equal(errorStatus(await call('updateOrderStatus',{orderId:id,to:'Accepted'},staffToken)),'FAILED_PRECONDITION');
+  });
+});
+
+describe('staff management',()=>{
+  test('only active admins can manage staff',async()=>{
+    const data={name:'New Staff',email:'new@example.test',role:'staff'};
+    assert.equal(errorStatus(await call('createStaff',data)),'UNAUTHENTICATED');
+    assert.equal(errorStatus(await call('createStaff',data,staffToken)),'PERMISSION_DENIED');
+    assert.equal(errorStatus(await call('createStaff',data,inactiveAdminToken)),'PERMISSION_DENIED');
+    assert.equal(errorStatus(await call('setStaffActive',{uid:'staff',active:false},staffToken)),'PERMISSION_DENIED');
+    assert.equal(errorStatus(await call('resetStaffPassword',{uid:'staff'},staffToken)),'PERMISSION_DENIED');
+  });
+
+  test('createStaff creates an Auth account, profile and reset link',async()=>{
+    const r=await call('createStaff',{name:' New Staff ',email:' NEW@Example.test ',role:'staff'},adminToken);
+    assert.ok(r.result.link);
+    const profile=(await db.doc(`users/${r.result.uid}`).get()).data();
+    assert.equal(profile.email,'new@example.test');
+    assert.equal(profile.name,'New Staff');
+    assert.equal(profile.active,true);
+    assert.equal((await auth.getUser(r.result.uid)).email,'new@example.test');
+  });
+
+  test('createStaff validates input and rejects existing emails',async()=>{
+    for(const data of [{name:'',email:'a@b.co',role:'staff'},{name:'A',email:'not-an-email',role:'staff'},{name:'A',email:'a@b.co',role:'customer'}])
+      assert.equal(errorStatus(await call('createStaff',data,adminToken)),'INVALID_ARGUMENT');
+    const before=(await db.collection('users').get()).size;
+    assert.equal(errorStatus(await call('createStaff',{name:'Dup',email:'staff@example.test',role:'staff'},adminToken)),'ALREADY_EXISTS');
+    assert.equal((await db.collection('users').get()).size,before);
+  });
+
+  test('setStaffActive updates both Auth and the profile',async()=>{
+    assert.ok((await call('setStaffActive',{uid:'staff',active:false},adminToken)).result);
+    assert.equal((await auth.getUser('staff')).disabled,true);
+    assert.equal((await db.doc('users/staff').get()).data().active,false);
+  });
+
+  test('setStaffActive rejects self-changes, bad input and non-staff accounts',async()=>{
+    assert.equal(errorStatus(await call('setStaffActive',{uid:'admin',active:false},adminToken)),'FAILED_PRECONDITION');
+    assert.equal(errorStatus(await call('setStaffActive',{uid:'staff',active:'false'},adminToken)),'INVALID_ARGUMENT');
+    assert.equal(errorStatus(await call('setStaffActive',{uid:'customer',active:false},adminToken)),'NOT_FOUND');
+    assert.equal((await auth.getUser('customer')).disabled,false);
+  });
+
+  test('resetStaffPassword works only for staff accounts',async()=>{
+    assert.ok((await call('resetStaffPassword',{uid:'staff'},adminToken)).result.link);
+    assert.equal(errorStatus(await call('resetStaffPassword',{uid:'customer'},adminToken)),'NOT_FOUND');
+    assert.equal(errorStatus(await call('resetStaffPassword',{uid:''},adminToken)),'INVALID_ARGUMENT');
+  });
+});
+
+describe('migratePrivateProductFields',()=>{
+  test('is admin-only',async()=>{
+    assert.equal(errorStatus(await call('migratePrivateProductFields',{},staffToken)),'PERMISSION_DENIED');
+  });
+
+  test('moves private fields across batches and is safe to rerun',async()=>{
+    const writer=db.bulkWriter();
+    for(let i=0;i<450;i++)
+      writer.set(db.doc(`products/LEGACY${i}`),{name:`Legacy ${i}`,status:'active',stock:1,purchasePrice:i,minPricePcs:i+1});
+    await writer.close();
+    await db.doc('productPrivate/LEGACY0').set({minPriceCtn:99});
+
+    const r=await call('migratePrivateProductFields',{},adminToken);
+    assert.equal(r.result.migrated,450);
+    const product=(await db.doc('products/LEGACY449').get()).data();
+    assert.equal(product.purchasePrice,undefined);
+    assert.equal(product.minPricePcs,undefined);
+    assert.deepEqual((await db.doc('productPrivate/LEGACY449').get()).data(),{purchasePrice:449,minPricePcs:450});
+    assert.deepEqual((await db.doc('productPrivate/LEGACY0').get()).data(),{purchasePrice:0,minPricePcs:1,minPriceCtn:99});
+
+    assert.equal((await call('migratePrivateProductFields',{},adminToken)).result.migrated,0);
+  });
+});

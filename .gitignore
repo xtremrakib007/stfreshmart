@@ -5,3 +5,4 @@ out
 .firebase
 functions/node_modules
 *.tsbuildinfo
+*-debug.log
