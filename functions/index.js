@@ -144,3 +144,57 @@ exports.migratePrivateProductFields=onCall(opt,async req=>{
   }
   return {scanned:snap.size,migrated,message:'Private product fields migrated and removed from public product documents.'};
 });
+
+// Trusted order workflow: clients cannot change order status or stock flags directly.
+exports.updateOrderStatus=onCall(opt,async req=>{
+  if(!req.auth)throw new HttpsError('unauthenticated','Log in first.');
+  const userSnap=await db.doc(`users/${req.auth.uid}`).get();
+  if(!userSnap.exists||userSnap.data().active!==true||!['staff','admin'].includes(userSnap.data().role))
+    throw new HttpsError('permission-denied','Active staff access required.');
+  const {orderId,to}=req.data||{};
+  if(typeof orderId!=='string'||!orderId||typeof to!=='string')
+    throw new HttpsError('invalid-argument','Order and target status are required.');
+  const allowed={
+    Pending:['Accepted','Cancelled'],
+    Accepted:['Preparing','Cancelled'],
+    Preparing:['Ready','Cancelled'],
+    Ready:['Out For Delivery','Cancelled'],
+    'Out For Delivery':['Delivered','Cancelled']
+  };
+  const orderRef=db.doc(`orders/${orderId}`);
+  await db.runTransaction(async tx=>{
+    const orderSnap=await tx.get(orderRef);
+    if(!orderSnap.exists)throw new HttpsError('not-found','Order not found.');
+    const order=orderSnap.data();
+    if(!(allowed[order.status]||[]).includes(to))
+      throw new HttpsError('failed-precondition','This status transition is not allowed.');
+    const deduct=to==='Accepted'&&!order.stockDeducted;
+    const restore=to==='Cancelled'&&order.stockDeducted===true;
+    const items=Array.isArray(order.items)?order.items:[];
+    if((deduct||restore)&&(!items.length||items.length>100))
+      throw new HttpsError('failed-precondition','Order items are invalid.');
+    const refs=items.map(i=>db.doc(`products/${String(i.sku).toUpperCase()}`));
+    const snaps=(deduct||restore)?await Promise.all(refs.map(ref=>tx.get(ref))):[];
+    const changes=[];
+    if(deduct||restore){
+      for(let i=0;i<snaps.length;i++){
+        const snap=snaps[i],item=items[i],qty=Number(item.qty);
+        if(!snap.exists||!Number.isInteger(qty)||qty<1)
+          throw new HttpsError('failed-precondition','Order contains an invalid or missing product.');
+        const stock=Number(snap.data().stock);
+        if(!Number.isFinite(stock)||stock<0||(deduct&&stock<qty))
+          throw new HttpsError('failed-precondition',`Insufficient or invalid stock for ${item.name||item.sku}.`);
+        changes.push({ref:snap.ref,sku:item.sku,from:stock,to:stock+(deduct?-qty:qty)});
+      }
+    }
+    for(const c of changes){
+      tx.update(c.ref,{stock:c.to});
+      tx.set(db.collection('inventoryHistory').doc(),{
+        sku:c.sku,from:c.from,to:c.to,reason:deduct?`order ${orderId}`:`cancel ${orderId}`,
+        at:admin.firestore.FieldValue.serverTimestamp(),changedBy:req.auth.uid
+      });
+    }
+    tx.update(orderRef,{status:to,...(deduct?{stockDeducted:true}:{}),...(restore?{stockDeducted:false}:{})});
+  });
+  return {ok:true,status:to};
+});
