@@ -8,7 +8,7 @@ const M={standard:'STANDARD DELIVERY',urgent:'URGENT DELIVERY',pickup:'SELF PICK
 const SAVED_KEYS = ['name','phone','company','address','city','state','postcode','collector','collectorPhone','vehicle','instructions'];
 
 export default function Checkout(){
-  const {products,cart,price,settings,role,clear}=useStore();
+  const {products,cart,price,settings,clear}=useStore();
   const [m,setM]=useState<keyof typeof M>('standard');
   const [f,setF]=useState<Record<string,string>>({});
   const [busy,setBusy]=useState(false);
@@ -37,7 +37,6 @@ export default function Checkout(){
   };
 
   const lines=products.filter(p=>cart[p.id]).map(p=>({sku:p.sku,name:p.name,unit:p.unit,qty:cart[p.id],price:price(p,cart[p.id])}));
-  const total=lines.reduce((s,l)=>s+l.price*l.qty,0);
   const F=(k:string,l:string,type='text',req=false)=><div key={k}><label className="lbl">{l}{req&&' *'}</label><input type={type} className="inp" value={f[k]||''} onChange={set(k)}/></div>;
 
   async function submit(){
