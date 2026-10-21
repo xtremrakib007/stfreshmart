@@ -1,0 +1,28 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{db}/documents {
+    function me() { return get(/databases/$(db)/documents/users/$(request.auth.uid)).data; }
+    function signed() { return request.auth != null && exists(/databases/$(db)/documents/users/$(request.auth.uid)) && me().active == true; }
+    function isStaff() { return signed() && me().role in ['staff','admin']; }
+    function isAdmin() { return signed() && me().role == 'admin'; }
+
+    match /products/{id} { allow read: if resource.data.status == 'active' || isStaff(); allow write: if isStaff(); }
+    match /settings/{id} { allow read: if true; allow write: if isAdmin(); }
+    // Staff prices are a separate collection so customers can never read them.
+    match /staffPrices/{id} { allow read: if isStaff(); allow write: if isAdmin(); }
+    // Users are created only by Cloud Functions (admin SDK); clients may read their own doc.
+    match /users/{uid} { allow read: if request.auth != null && (request.auth.uid == uid || isAdmin()); allow write: if false; }
+    match /orders/{id} {
+      allow create: if request.resource.data.keys().hasOnly(['customer','method','delivery','items','total','status','placedBy','message','createdAt'])
+        && request.resource.data.status == 'Pending'
+        && request.resource.data.items is list && request.resource.data.items.size() > 0 && request.resource.data.items.size() <= 100
+        && request.resource.data.customer.name is string && request.resource.data.customer.name.size() < 120
+        && request.resource.data.message.size() < 5000
+        && request.resource.data.createdAt == request.time;
+      allow read, update: if isStaff();
+    }
+    match /priceHistory/{id} { allow read, write: if isAdmin(); }
+    match /inventoryHistory/{id} { allow read, write: if isStaff(); }
+    match /banners/{id} { allow read: if true; allow write: if isAdmin(); }
+  }
+}

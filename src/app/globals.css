@@ -1,0 +1,30 @@
+@tailwind base;@tailwind components;@tailwind utilities;
+body{@apply bg-frost text-ink antialiased}
+:focus-visible{outline:2px solid #1F5C63;outline-offset:2px}
+.btn{@apply inline-flex items-center justify-center rounded-md bg-brine px-4 py-2 text-sm font-semibold text-white disabled:opacity-40}
+.btn-alt{@apply inline-flex items-center justify-center rounded-md border border-line bg-white px-4 py-2 text-sm font-semibold}
+.inp{@apply w-full rounded-md border border-line bg-white px-3 py-2 text-sm}
+.lbl{@apply mb-1 block text-sm font-medium}
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #printable-invoice, #printable-invoice * {
+    visibility: visible;
+  }
+  #printable-invoice {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    margin: 0;
+    padding: 24px;
+    background: white;
+    color: #14272B;
+    display: block !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+}
