@@ -1,6 +1,6 @@
 'use client';
 import {useState,useEffect} from 'react';
-import {collection,doc,setDoc,deleteDoc,getDoc,getDocs,serverTimestamp} from 'firebase/firestore';
+import {collection,doc,setDoc,deleteDoc,getDoc,getDocs,serverTimestamp,writeBatch} from 'firebase/firestore';
 import {ref,uploadBytes,getDownloadURL} from 'firebase/storage';
 import {db,storage,fns} from '@/lib/firebase';
 import {httpsCallable} from 'firebase/functions';
@@ -63,19 +63,23 @@ export function Products(){
         .filter((s:any)=>Number.isFinite(Number(s.minQty))&&Number(s.minQty)>0&&Number.isFinite(Number(s.price))&&Number(s.price)>0)
         .sort((a:any,b:any)=>a.minQty-b.minQty);
       const productData={...publicProduct,priceSlabs:cleanSlabs,sku:id,status:publicProduct.status||'active'};
-      await setDoc(doc(db,'products',id),productData);
-      await setDoc(doc(db,'staffPrices',id),{price:staffPrice});
+      // Keep the product, price records, private costs, and audit history consistent.
+      // If any write fails, none of this save is committed.
+      const batch=writeBatch(db);
+      batch.set(doc(db,'products',id),productData);
+      batch.set(doc(db,'staffPrices',id),{price:staffPrice});
       if(role==='admin'){
-        await setDoc(doc(db,'productPrivate',id),{
+        batch.set(doc(db,'productPrivate',id),{
           purchasePrice:Number(purchasePrice)||0,
           minPricePcs:Number(minPricePcs)||0,
           minPriceCtn:Number(minPriceCtn)||0
         });
       }
       if(!old||old.retail!==productData.retailPrice||old.staff!==staffPrice)
-        await setDoc(doc(collection(db,'priceHistory')),{sku:id,retailPrice:productData.retailPrice,staffPrice,at:new Date()});
+        batch.set(doc(collection(db,'priceHistory')),{sku:id,retailPrice:productData.retailPrice,staffPrice,at:serverTimestamp()});
       if(!old||old.stock!==productData.stock)
-        await setDoc(doc(collection(db,'inventoryHistory')),{sku:id,from:old?.stock??0,to:productData.stock,reason:'manual',at:serverTimestamp()});
+        batch.set(doc(collection(db,'inventoryHistory')),{sku:id,from:old?.stock??0,to:productData.stock,reason:'manual',at:serverTimestamp()});
+      await batch.commit();
       setF(blank);setOld(null);setMsg('Product saved.');
       if(role==='admin')setPrivatePrices(prev=>({...prev,[id]:{purchasePrice:Number(purchasePrice)||0,minPricePcs:Number(minPricePcs)||0,minPriceCtn:Number(minPriceCtn)||0}}));
     }catch{setMsg('Could not save. Check your connection and permissions.')}
