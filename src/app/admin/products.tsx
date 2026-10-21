@@ -1,6 +1,6 @@
 'use client';
 import {useState} from 'react';
-import {collection,doc,setDoc,deleteDoc,getDoc} from 'firebase/firestore';
+import {collection,doc,setDoc,deleteDoc,getDoc,serverTimestamp} from 'firebase/firestore';
 import {ref,uploadBytes,getDownloadURL} from 'firebase/storage';
 import {db,storage,fns} from '@/lib/firebase';
 import {httpsCallable} from 'firebase/functions';
@@ -66,7 +66,7 @@ export function Products(){
       if(!old||old.retail!==productData.retailPrice||old.staff!==staffPrice)
         await setDoc(doc(collection(db,'priceHistory')),{sku:id,retailPrice:productData.retailPrice,staffPrice,at:new Date()});
       if(!old||old.stock!==productData.stock)
-        await setDoc(doc(collection(db,'inventoryHistory')),{sku:id,from:old?.stock??0,to:productData.stock,reason:'manual',at:new Date()});
+        await setDoc(doc(collection(db,'inventoryHistory')),{sku:id,from:old?.stock??0,to:productData.stock,reason:'manual',at:serverTimestamp()});
       setF(blank);setOld(null);setMsg('Product saved.');
     }catch{setMsg('Could not save. Check your connection and permissions.')}
   }
