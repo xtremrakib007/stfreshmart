@@ -1,7 +1,7 @@
 'use client';
 import {useState, useEffect} from 'react';
-import {addDoc,collection,serverTimestamp} from 'firebase/firestore';
-import {db} from '@/lib/firebase';
+import {httpsCallable} from 'firebase/functions';
+import {fns} from '@/lib/firebase';
 import {useStore} from '@/lib/store';
 import {buildMessage,waLink} from '@/lib/whatsapp';
 const M={standard:'STANDARD DELIVERY',urgent:'URGENT DELIVERY',pickup:'SELF PICKUP'} as const;
@@ -53,12 +53,25 @@ export default function Checkout(){
       }catch{}
     }
 
-    const address=m==='pickup'?'':[f.address,f.city,f.state,f.postcode].join(', ');
-    const when=[f.date,f.time].filter(Boolean).join(' ');
-    const msg=buildMessage({customer:f.name,phone:f.phone,company:f.company||'',method:M[m],address,when,lines,total,currency:settings.currency,notes:[f.instructions,f.notes].filter(Boolean).join('. '),urgent:f.reason});
-    try{await addDoc(collection(db,'orders'),{customer:{name:f.name,phone:f.phone,company:f.company||''},method:M[m],delivery:f,items:lines,total,status:'Pending',placedBy:role,message:msg,createdAt:serverTimestamp()});
+    try{
+      const createOrder=httpsCallable(fns,'createOrder');
+      const result=await createOrder({
+        customer:{name:f.name.trim(),phone:f.phone.trim(),company:(f.company||'').trim()},
+        method:M[m],
+        delivery:f,
+        items:cart
+      });
+      const verified=result.data as {orderId:string;lines:{sku:string;name:string;unit:string;qty:number;price:number}[];total:number;currency:string};
+      const verifiedLines=verified.lines.map(l=>({sku:l.sku,name:l.name,unit:l.unit,qty:l.qty,price:l.price}));
+      const address=m==='pickup'?'':[f.address,f.city,f.state,f.postcode].join(', ');
+      const when=[f.date,f.time].filter(Boolean).join(' ');
+      const msg=buildMessage({customer:f.name,phone:f.phone,company:f.company||'',method:M[m],address,when,lines:verifiedLines,total:verified.total,currency:verified.currency||settings.currency,notes:[f.instructions,f.notes].filter(Boolean).join('. '),urgent:f.reason});
       clear();window.location.href=waLink(settings.whatsappNumber,msg);
-    }catch(e){setErr('Could not save the order. Check your connection and try again.');setBusy(false)}
+    }catch(e:any){
+      const code=e?.code||'';
+      setErr(code==='functions/failed-precondition'?(e.message||'A product price or stock level changed. Review your cart and try again.'):'Could not save the order. Check your connection and try again.');
+      setBusy(false);
+    }
   }
 
   return <div className="max-w-xl space-y-4">
