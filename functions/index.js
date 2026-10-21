@@ -43,6 +43,12 @@ exports.createOrder=onCall({...opt, enforceAppCheck:false},async req=>{
     throw new HttpsError('invalid-argument','Valid customer name and phone are required.');
   if(!requested||typeof requested!=='object'||Array.isArray(requested)||Object.keys(requested).length<1||Object.keys(requested).length>100)
     throw new HttpsError('invalid-argument','Choose between 1 and 100 products.');
+  const normalizedSkus=new Set();
+  for(const sku of Object.keys(requested)){
+    const normalized=sku.toUpperCase();
+    if(normalizedSkus.has(normalized)) throw new HttpsError('invalid-argument','Duplicate product SKU keys are not allowed.');
+    normalizedSkus.add(normalized);
+  }
   for(const key of ['address','city','state','postcode','date','time','collector','collectorPhone','vehicle','instructions','notes','reason']){
     if(delivery[key]!==undefined&&(typeof delivery[key]!=='string'||delivery[key].length>500))
       throw new HttpsError('invalid-argument','Invalid delivery details.');
