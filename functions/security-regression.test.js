@@ -66,6 +66,6 @@ test('physical stock count reconciliation checks stale balances and records vari
   assert.match(source,/exports\.reconcileStockCount=onCall\(opt,async req=>\{\s*await guard\(req\)/);
   assert.match(source,/Stock changed since this count was started/);
   assert.match(source,/type:'stock_count',expectedStock:current,countedStock:data\.countedStock/);
-  assert.match(source,/variance,reason:\\x60stock_count: \\x24\\{reason\\}\\x60/);
-  assert.match(source,/tx\\.update\\(productRef,\\{stock:data\\.countedStock\\}\\)[\\s\\S]*?stock_count/);
+  assert.match(source,/variance,reason:\x60stock_count: \x24\{reason\}\x60/);
+  assert.match(source,/tx\.update\(productRef,\{stock:data\.countedStock\}\)[\s\S]*?stock_count/);
 });
