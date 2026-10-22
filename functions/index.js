@@ -257,6 +257,36 @@ exports.migratePrivateProductFields=onCall(opt,async req=>{
   return {scanned:snap.size,migrated,message:'Private product fields migrated and removed from public product documents.'};
 });
 
+// Admin-only stock adjustment. The stock mutation and audit record commit atomically.
+exports.adjustStock=onCall(opt,async req=>{
+  await guard(req);
+  const data=req.data||{};
+  if(typeof data.sku!=='string'||! /^[A-Za-z0-9._-]{1,100}$/.test(data.sku.trim()))
+    throw new HttpsError('invalid-argument','A valid product SKU is required.');
+  if(typeof data.delta!=='number'||!Number.isSafeInteger(data.delta)||data.delta===0||Math.abs(data.delta)>100000)
+    throw new HttpsError('invalid-argument','Stock change must be a non-zero whole number within 100000 units.');
+  if(typeof data.reason!=='string'||!data.reason.trim()||data.reason.trim().length>200)
+    throw new HttpsError('invalid-argument','A reason of 1–200 characters is required.');
+  const sku=data.sku.trim().toUpperCase();
+  const productRef=db.doc(`products/${sku}`);
+  let result;
+  await db.runTransaction(async tx=>{
+    const snap=await tx.get(productRef);
+    if(!snap.exists)throw new HttpsError('not-found','Product not found.');
+    const current=Number(snap.data().stock);
+    const next=current+data.delta;
+    if(!Number.isSafeInteger(current)||current<0||!Number.isSafeInteger(next)||next<0)
+      throw new HttpsError('failed-precondition','This adjustment would create invalid or negative stock.');
+    tx.update(productRef,{stock:next});
+    tx.set(db.collection('inventoryHistory').doc(),{
+      sku,from:current,to:next,reason:`adjustment: ${data.reason.trim()}`,
+      at:FieldValue.serverTimestamp(),changedBy:req.auth.uid
+    });
+    result={sku,from:current,to:next};
+  });
+  return result;
+});
+
 // Trusted order workflow: clients cannot change order status or stock flags directly.
 exports.updateOrderStatus=onCall(opt,async req=>{
   if(!req.auth)throw new HttpsError('unauthenticated','Log in first.');
