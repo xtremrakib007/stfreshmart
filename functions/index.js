@@ -84,6 +84,9 @@ exports.resetStaffPassword=onCall(opt,async req=>{await guard(req);
 // All customer order prices are recalculated here. The browser submits only product IDs and quantities.
 exports.createOrder=onCall({...opt, enforceAppCheck:false},async req=>{
   const data=req.data||{};
+  const requestId=data.requestId;
+  if(typeof requestId!=='string'||! /^[A-Za-z0-9_-]{16,128}$/.test(requestId))
+    throw new HttpsError('invalid-argument','A valid checkout request ID is required.');
   const customer=data.customer||{};
   const method=data.method;
   const delivery=data.delivery||{};
@@ -175,8 +178,33 @@ exports.createOrder=onCall({...opt, enforceAppCheck:false},async req=>{
     cleanDelivery.instructions||cleanDelivery.notes||''
   ].filter(Boolean).join('\n');
   const order={customer:{name:customer.name.trim(),phone:customer.phone.trim(),company:(customer.company||'').trim()},method,delivery:cleanDelivery,items:lines,total,status:'Pending',placedBy:role,message,createdAt:FieldValue.serverTimestamp()};
-  const ref=await db.collection('orders').add(order);
-  return {orderId:ref.id,lines,total,currency,message};
+  // A stable request ID makes client retries safe. Scope keys to the authenticated user
+  // (or the guest namespace) and bind each key to the validated request payload.
+  const requestScope=req.auth?req.auth.uid:'guest';
+  const requestKey=crypto.createHash('sha256').update(requestScope+'\\0'+requestId).digest('hex');
+  const fingerprint=crypto.createHash('sha256').update(JSON.stringify({
+    customer:order.customer,method,delivery:cleanDelivery,
+    items:lines.map(line=>({sku:line.sku,qty:line.qty})).sort((a,b)=>a.sku.localeCompare(b.sku))
+  })).digest('hex');
+  const requestRef=db.doc(`checkoutRequests/${requestKey}`);
+  const ref=db.collection('orders').doc();
+  const result=await db.runTransaction(async tx=>{
+    const prior=await tx.get(requestRef);
+    if(prior.exists){
+      const saved=prior.data();
+      if(saved.fingerprint!==fingerprint)
+        throw new HttpsError('failed-precondition','This checkout request ID was already used with different order details. Start a new checkout attempt.');
+      const priorOrder=await tx.get(db.doc(`orders/${saved.orderId}`));
+      if(!priorOrder.exists)
+        throw new HttpsError('failed-precondition','The original order record is unavailable. Contact support before retrying.');
+      const existing=priorOrder.data();
+      return {orderId:saved.orderId,lines:existing.items,total:existing.total,currency,message:existing.message};
+    }
+    tx.create(ref,order);
+    tx.create(requestRef,{fingerprint,orderId:ref.id,createdAt:FieldValue.serverTimestamp()});
+    return {orderId:ref.id,lines,total,currency,message};
+  });
+  return result;
 });
 
 
