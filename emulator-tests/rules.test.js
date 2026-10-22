@@ -190,4 +190,8 @@ describe('storage',()=>{
     await env.withSecurityRulesDisabled(ctx=>uploadBytes(ref(ctx.storage(),'products/a.png'),image,{contentType:'image/png'}));
     await assertSucceeds(getBytes(ref(env.unauthenticatedContext().storage(),'products/a.png')));
   });
+  test('files outside products are not publicly readable',async()=>{
+    await env.withSecurityRulesDisabled(ctx=>uploadBytes(ref(ctx.storage(),'private/invoice.pdf'),image,{contentType:'application/pdf'}));
+    await assertFails(getBytes(ref(env.unauthenticatedContext().storage(),'private/invoice.pdf')));
+  });
 });
