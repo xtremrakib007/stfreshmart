@@ -109,7 +109,7 @@ export function Products(){
   async function receiveStock(p:any){
     const rawQuantity=prompt(`Quantity received for ${p.sku}:`,'1');
     if(rawQuantity===null)return;
-    if(!/^\\d+$/.test(rawQuantity.trim())||Number(rawQuantity)<1||Number(rawQuantity)>100000){
+    if(!/^-?\d+$/.test(rawQuantity.trim())||Number(rawQuantity)<1||Number(rawQuantity)>100000){
       setMsg('Enter a whole-number quantity from 1 to 100000.');return;
     }
     const supplier=prompt('Supplier name:');
