@@ -29,5 +29,5 @@ export default function Admin(){
 
   return <div><div className="mb-4 flex gap-2 overflow-x-auto">{TABS.map(t=><button key={t} onClick={()=>setTab(t)} className={tab===t?'btn':'btn-alt'}>{t}{t==='Orders'&&pending>0&&` (${pending})`}</button>)}</div>
     {tab==='Dashboard'&&<div className="grid grid-cols-2 gap-3 md:grid-cols-4">{stat.map(([l,n])=><div key={l as string} className="rounded-lg border border-line bg-white p-4"><p className="text-3xl font-bold">{n}</p><p className="text-sm text-ink/60">{l}</p></div>)}</div>}
-    {tab==='Products'&&<Products/>}{tab==='Orders'&&<Orders orders={orders}/ >}{tab==='Inventory'&&<InventoryHistory/>}{tab==='Staff'&&role==='admin'&&<Staff/>}{tab==='Import'&&role==='admin'&&<ImportTab/>}{tab==='Settings'&&role==='admin'&&<SettingsTab/>}</div>;
+    {tab==='Products'&&<Products/>}{tab==='Orders'&&<Orders orders={orders}/>}{tab==='Inventory'&&<InventoryHistory/>}{tab==='Staff'&&role==='admin'&&<Staff/>}{tab==='Import'&&role==='admin'&&<ImportTab/>}{tab==='Settings'&&role==='admin'&&<SettingsTab/>}</div>;
 }
