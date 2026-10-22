@@ -56,7 +56,7 @@ export function Products(){
   }
   async function save(){
     if(!f.sku.trim()||!f.name.trim()){setMsg('SKU and name are required.');return}
-    const numericFields=['stock','retailPrice','promoPrice','staffPrice','purchasePrice','minPricePcs','minPriceCtn'];
+    const numericFields=['retailPrice','promoPrice','staffPrice','purchasePrice','minPricePcs','minPriceCtn'];
     if(numericFields.some(key=>!Number.isFinite(Number(f[key]))||Number(f[key])<0)){setMsg('Enter valid non-negative numbers for all prices and stock.');return}
     try{
       const id=f.sku.trim().toUpperCase();
@@ -64,7 +64,7 @@ export function Products(){
       const cleanSlabs=(publicProduct.priceSlabs||[])
         .filter((s:any)=>Number.isFinite(Number(s.minQty))&&Number(s.minQty)>0&&Number.isFinite(Number(s.price))&&Number(s.price)>0)
         .sort((a:any,b:any)=>a.minQty-b.minQty);
-      const productData={...publicProduct,priceSlabs:cleanSlabs,sku:id,status:publicProduct.status||'active'};
+      const productData={...publicProduct,stock:old?old.stock:0,priceSlabs:cleanSlabs,sku:id,status:publicProduct.status||'active'};
       // Keep the product, price records, private costs, and audit history consistent.
       // If any write fails, none of this save is committed.
       const batch=writeBatch(db);
@@ -79,8 +79,6 @@ export function Products(){
       }
       if(!old||old.retail!==productData.retailPrice||old.staff!==staffPrice)
         batch.set(doc(collection(db,'priceHistory')),{sku:id,retailPrice:productData.retailPrice,staffPrice,at:serverTimestamp()});
-      if(!old||old.stock!==productData.stock)
-        batch.set(doc(collection(db,'inventoryHistory')),{sku:id,from:old?.stock??0,to:productData.stock,reason:'manual',at:serverTimestamp()});
       await batch.commit();
       setF(blank);setOld(null);setMsg('Product saved.');
       if(role==='admin')setPrivatePrices(prev=>({...prev,[id]:{purchasePrice:Number(purchasePrice)||0,minPricePcs:Number(minPricePcs)||0,minPriceCtn:Number(minPriceCtn)||0}}));
@@ -229,7 +227,7 @@ export function Products(){
               {Array.from(new Set([...UNITS,'PCS','CTN','BOX','PACK','BTL','CAN','TIN',...products.map(p=>p.unit)].filter(Boolean))).map(u=><option key={u} value={u} />)}
             </datalist>
           </div>
-          <div><label className="lbl">Stock</label><input type="number" min={0} className="inp" value={f.stock} onChange={k('stock')}/></div>
+          <div><label className="lbl">Stock (managed separately)</label><input type="number" className="inp" value={f.stock??0} readOnly/><p className="mt-1 text-xs text-ink/60">Use Receive stock, Adjust stock, or Count stock to change inventory with an audit record.</p></div>
           <div><label className="lbl">Retail Price (RM)</label><input type="number" min={0} step="0.01" className="inp" value={f.retailPrice} onChange={k('retailPrice')}/></div>
           <div><label className="lbl">🔥 Promo Price (RM) <span className="font-normal text-ink/50">0 = no promo</span></label><input type="number" min={0} step="0.01" className="inp text-red-700 font-semibold" value={f.promoPrice} onChange={k('promoPrice')}/></div>
           <div><label className="lbl">Staff Price (RM)</label><input type="number" min={0} step="0.01" className="inp" value={f.staffPrice} onChange={k('staffPrice')}/></div>
