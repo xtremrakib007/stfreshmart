@@ -441,7 +441,7 @@ exports.saveSupplier=onCall(opt,async req=>{
     clean[field]=value.trim();
   }
   if(!clean.name)throw new HttpsError('invalid-argument','Supplier name is required.');
-  if(clean.email&&!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(clean.email))
+  if(clean.email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean.email))
     throw new HttpsError('invalid-argument','Enter a valid supplier email address.');
   if(data.active!==undefined&&typeof data.active!=='boolean')
     throw new HttpsError('invalid-argument','Supplier active status must be true or false.');
