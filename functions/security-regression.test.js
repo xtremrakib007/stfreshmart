@@ -69,3 +69,12 @@ test('physical stock count reconciliation checks stale balances and records vari
   assert.match(source,/variance,reason:\x60stock_count: \x24\{reason\}\x60/);
   assert.match(source,/tx\.update\(productRef,\{stock:data\.countedStock\}\)[\s\S]*?stock_count/);
 });
+
+
+test('supplier directory writes are admin-guarded and validate contact fields',()=>{
+  assert.match(source,/exports\.saveSupplier=onCall\(opt,async req=>\{\s*await guard\(req\)/);
+  assert.match(source,/Supplier name is required/);
+  assert.match(source,/Enter a valid supplier email address/);
+  assert.match(source,/Supplier ID is invalid/);
+  assert.match(source,/updatedBy:req\.auth\.uid/);
+});

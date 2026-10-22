@@ -102,6 +102,11 @@ service cloud.firestore {
         && request.resource.data.at == request.time;
       allow update, delete: if false;
     }
+    match /suppliers/{id} {
+      allow read: if isStaff();
+      // Supplier records are changed only through the admin-guarded saveSupplier callable.
+      allow write: if false;
+    }
     match /banners/{id} {
       allow read: if true;
       allow write: if isAdmin();
