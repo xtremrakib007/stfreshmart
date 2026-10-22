@@ -89,7 +89,7 @@ export function Products(){
   async function adjustStock(p:any){
     const rawDelta=prompt(`Stock change for ${p.sku} (use a negative number to remove stock):`,'0');
     if(rawDelta===null)return;
-    if(!/^-?\\d+$/.test(rawDelta.trim())||Number(rawDelta)===0||Math.abs(Number(rawDelta))>100000){
+    if(!/^-?\d+$/.test(rawDelta.trim())||Number(rawDelta)===0||Math.abs(Number(rawDelta))>100000){
       setMsg('Enter a non-zero whole-number stock change within 100000 units.');return;
     }
     const reason=prompt('Reason (for example: supplier delivery, damaged goods, stock count):');
