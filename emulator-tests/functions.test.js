@@ -380,3 +380,33 @@ describe('reconcileStockCount',()=>{
     assert.equal((await db.collection('inventoryHistory').get()).size,0);
   });
 });
+
+
+describe('saveSupplier',()=>{
+  test('admin creates and updates supplier records with normalized fields',async()=>{
+    const created=await call('saveSupplier',{name:'  Penang Wholesale  ',contactName:'  Mei  ',phone:'0123456789',email:'mei@example.com',address:'Penang',notes:'Main supplier'});
+    assert.ok(created.result.supplierId);
+    const saved=(await db.doc(`suppliers/${created.result.supplierId}`).get()).data();
+    assert.equal(saved.name,'Penang Wholesale');
+    assert.equal(saved.contactName,'Mei');
+    assert.equal(saved.active,true);
+    const updated=await call('saveSupplier',{supplierId:created.result.supplierId,name:'Penang Wholesale Sdn Bhd',active:false});
+    assert.equal(updated.result.supplierId,created.result.supplierId);
+    const changed=(await db.doc(`suppliers/${created.result.supplierId}`).get()).data();
+    assert.equal(changed.name,'Penang Wholesale Sdn Bhd');
+    assert.equal(changed.active,false);
+    assert.equal(changed.phone,'');
+  });
+  test('supplier writes require active admin access',async()=>{
+    const r=await call('saveSupplier',{name:'Not allowed'},staffToken);
+    assert.equal(errorStatus(r),'PERMISSION_DENIED');
+    const inactive=await call('saveSupplier',{name:'Not allowed'},inactiveAdminToken);
+    assert.equal(errorStatus(inactive),'PERMISSION_DENIED');
+  });
+  test('supplier validation rejects missing name, invalid email, and malformed ID',async()=>{
+    assert.equal(errorStatus(await call('saveSupplier',{name:'  '})),'INVALID_ARGUMENT');
+    assert.equal(errorStatus(await call('saveSupplier',{name:'Supplier',email:'not-an-email'})),'INVALID_ARGUMENT');
+    assert.equal(errorStatus(await call('saveSupplier',{supplierId:'../users',name:'Supplier'})),'INVALID_ARGUMENT');
+    assert.equal((await db.collection('suppliers').get()).size,0);
+  });
+});
