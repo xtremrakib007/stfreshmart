@@ -125,6 +125,9 @@ exports.createOrder=onCall({...opt, enforceAppCheck:false},async req=>{
     if(typeof qty!=='number'||!Number.isSafeInteger(qty)||qty<1||qty>100000)
       throw new HttpsError('invalid-argument',`Invalid quantity for ${sku}.`);
   }
+  const cleanDelivery={};
+  for(const key of ['name','phone','company','address','city','state','postcode','date','time','collector','collectorPhone','vehicle','instructions','notes','reason'])
+    if(typeof delivery[key]==='string')cleanDelivery[key]=delivery[key].trim().slice(0,500);
   const normalizedCustomer={name:customer.name.trim(),phone:customer.phone.trim(),company:(customer.company||'').trim()};
   const requestScope=req.auth?req.auth.uid:'guest';
   const requestKey=crypto.createHash('sha256').update(requestScope+'\\0'+requestId).digest('hex');
@@ -186,9 +189,6 @@ exports.createOrder=onCall({...opt, enforceAppCheck:false},async req=>{
   }
   const total=lines.reduce((sum,line)=>sum+line.qty*line.price,0);
   if(!Number.isFinite(total)||total>10000000)throw new HttpsError('failed-precondition','Order total is outside the allowed range.');
-  const cleanDelivery={};
-  for(const key of ['name','phone','company','address','city','state','postcode','date','time','collector','collectorPhone','vehicle','instructions','notes','reason'])
-    if(typeof delivery[key]==='string')cleanDelivery[key]=delivery[key].trim().slice(0,500);
   const currencySnap=await db.doc('settings/main').get();
   const currency=currencySnap.exists&&typeof currencySnap.data().currency==='string'?currencySnap.data().currency:'RM';
   const message=[
