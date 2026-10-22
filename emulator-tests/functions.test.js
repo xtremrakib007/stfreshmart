@@ -47,6 +47,16 @@ describe('createOrder',()=>{
     assert.equal((await db.collection('orders').get()).size,1);
   });
 
+  test('returns the original order on retry even after stock becomes unavailable',async()=>{
+    const data=orderData({OIL1:4},{requestId:'retry-after-stock-change-0001'});
+    const first=await call('createOrder',data);
+    await db.doc('products/OIL1').update({stock:0,status:'inactive'});
+    const retry=await call('createOrder',data);
+    assert.equal(retry.result.orderId,first.result.orderId);
+    assert.equal(retry.result.total,first.result.total);
+    assert.equal((await db.collection('orders').get()).size,1);
+  });
+
   test('concurrent retries with the same checkout request ID create one order',async()=>{
     const data=orderData({RICE5:2},{requestId:'parallel-checkout-request-0001'});
     const [a,b]=await Promise.all([call('createOrder',data),call('createOrder',data)]);
