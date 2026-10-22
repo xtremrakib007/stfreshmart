@@ -106,6 +106,27 @@ export function Products(){
     }finally{setAdjustingStock(false);}
   }
 
+  async function reconcileStockCount(p:any){
+    const rawCount=prompt(`Physical quantity counted for ${p.sku} (system currently shows ${p.stock}):`,String(p.stock));
+    if(rawCount===null)return;
+    if(!/^\d+$/.test(rawCount.trim())||!Number.isSafeInteger(Number(rawCount))||Number(rawCount)<0){
+      setMsg('Enter a non-negative whole-number counted quantity.');return;
+    }
+    const reason=prompt('Count note (for example: monthly count, damaged stock found, shelf recount):');
+    if(reason===null)return;
+    if(!reason.trim()||reason.trim().length>200){setMsg('A count note of 1–200 characters is required.');return;}
+    setAdjustingStock(true);setMsg('Saving physical stock count...');
+    try{
+      const reconcile=httpsCallable(fns,'reconcileStockCount');
+      const response=await reconcile({sku:p.sku,expectedStock:Number(p.stock),countedStock:Number(rawCount),reason:reason.trim()});
+      const data=response.data as {from:number;to:number;variance:number};
+      const varianceText=data.variance===0?'no variance':`variance ${data.variance>0?'+':''}${data.variance}`;
+      setMsg(`${p.sku}: count saved. System ${data.from}, counted ${data.to} (${varianceText}).`);
+    }catch(err:any){
+      setMsg(err?.code==='functions/failed-precondition'?'Count not applied: stock changed since the list loaded. Refresh and recount.':'Stock count failed. Check admin permissions and try again.');
+    }finally{setAdjustingStock(false);}
+  }
+
   async function receiveStock(p:any){
     const rawQuantity=prompt(`Quantity received for ${p.sku}:`,'1');
     if(rawQuantity===null)return;
@@ -330,6 +351,9 @@ export function Products(){
                   )}
                   {role==='admin' && (
                     <button disabled={adjustingStock} onClick={()=>receiveStock(p)} className="text-xs font-semibold btn-alt py-1 px-2.5 disabled:opacity-50">{adjustingStock?'Saving...':'Receive stock'}</button>
+                  )}
+                  {role==='admin' && (
+                    <button disabled={adjustingStock} onClick={()=>reconcileStockCount(p)} className="text-xs font-semibold btn-alt py-1 px-2.5 disabled:opacity-50">{adjustingStock?'Saving...':'Count stock'}</button>
                   )}
                   {role==='admin' && (
                     <button onClick={()=>confirm('Delete this product?')&&deleteDoc(doc(db,'products',p.id))} className="text-xs text-label hover:underline p-1">Delete</button>

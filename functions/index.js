@@ -320,6 +320,41 @@ exports.receiveStock=onCall(opt,async req=>{
   return result;
 });
 
+// Reconcile a physical stock count only if the system balance has not changed since it was observed.
+exports.reconcileStockCount=onCall(opt,async req=>{
+  await guard(req);
+  const data=req.data||{};
+  if(typeof data.sku!=='string'||! /^[A-Za-z0-9._-]{1,100}$/.test(data.sku.trim()))
+    throw new HttpsError('invalid-argument','A valid product SKU is required.');
+  if(typeof data.expectedStock!=='number'||!Number.isSafeInteger(data.expectedStock)||data.expectedStock<0)
+    throw new HttpsError('invalid-argument','Expected stock must be a non-negative whole number.');
+  if(typeof data.countedStock!=='number'||!Number.isSafeInteger(data.countedStock)||data.countedStock<0||data.countedStock>Number.MAX_SAFE_INTEGER)
+    throw new HttpsError('invalid-argument','Counted stock must be a non-negative whole number.');
+  if(typeof data.reason!=='string'||!data.reason.trim()||data.reason.trim().length>200)
+    throw new HttpsError('invalid-argument','A reason of 1–200 characters is required.');
+  const sku=data.sku.trim().toUpperCase(), reason=data.reason.trim();
+  const productRef=db.doc(`products/${sku}`);
+  let result;
+  await db.runTransaction(async tx=>{
+    const snap=await tx.get(productRef);
+    if(!snap.exists)throw new HttpsError('not-found','Product not found.');
+    const current=Number(snap.data().stock);
+    if(!Number.isSafeInteger(current)||current<0)
+      throw new HttpsError('failed-precondition','Current system stock is invalid.');
+    if(current!==data.expectedStock)
+      throw new HttpsError('failed-precondition','Stock changed since this count was started. Refresh the product list and count again.');
+    const variance=data.countedStock-current;
+    tx.update(productRef,{stock:data.countedStock});
+    tx.set(db.collection('inventoryHistory').doc(),{
+      sku,from:current,to:data.countedStock,variance,reason:`stock_count: ${reason}`,
+      type:'stock_count',expectedStock:current,countedStock:data.countedStock,
+      at:FieldValue.serverTimestamp(),changedBy:req.auth.uid
+    });
+    result={sku,from:current,to:data.countedStock,variance};
+  });
+  return result;
+});
+
 // Trusted order workflow: clients cannot change order status or stock flags directly.
 exports.updateOrderStatus=onCall(opt,async req=>{
   if(!req.auth)throw new HttpsError('unauthenticated','Log in first.');

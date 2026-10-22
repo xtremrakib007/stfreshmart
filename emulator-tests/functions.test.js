@@ -336,3 +336,47 @@ describe('receiveStock',()=>{
     assert.equal((await db.collection('inventoryHistory').get()).size,0);
   });
 });
+
+describe('reconcileStockCount',()=>{
+  test('only active admins can reconcile physical counts',async()=>{
+    const data={sku:'RICE5',expectedStock:50,countedStock:47,reason:'Weekly stock count'};
+    assert.equal(errorStatus(await call('reconcileStockCount',data,staffToken)),'PERMISSION_DENIED');
+    assert.equal(errorStatus(await call('reconcileStockCount',data,customerToken)),'PERMISSION_DENIED');
+    assert.equal(errorStatus(await call('reconcileStockCount',data,inactiveAdminToken)),'PERMISSION_DENIED');
+    assert.equal(await stock('RICE5'),50);
+    assert.equal((await db.collection('inventoryHistory').get()).size,0);
+  });
+
+  test('reconciles physical stock and audits variance atomically',async()=>{
+    const r=await call('reconcileStockCount',{sku:' rice5 ',expectedStock:50,countedStock:47,reason:' Weekly count aisle A '},adminToken);
+    assert.deepEqual(r.result,{sku:'RICE5',from:50,to:47,variance:-3});
+    assert.equal(await stock('RICE5'),47);
+    const rows=(await db.collection('inventoryHistory').get()).docs.map(d=>d.data());
+    assert.equal(rows.length,1);
+    assert.equal(rows[0].type,'stock_count');
+    assert.equal(rows[0].from,50);
+    assert.equal(rows[0].to,47);
+    assert.equal(rows[0].variance,-3);
+    assert.equal(rows[0].expectedStock,50);
+    assert.equal(rows[0].countedStock,47);
+    assert.equal(rows[0].reason,'stock_count: Weekly count aisle A');
+    assert.equal(rows[0].changedBy,'admin');
+    assert.ok(rows[0].at);
+  });
+
+  test('rejects stale counts, invalid values and missing products without changing stock',async()=>{
+    await db.doc('products/RICE5').update({stock:51});
+    const stale=await call('reconcileStockCount',{sku:'RICE5',expectedStock:50,countedStock:47,reason:'count'},adminToken);
+    assert.equal(errorStatus(stale),'FAILED_PRECONDITION');
+    for(const data of [
+      {sku:'RICE5',expectedStock:-1,countedStock:47,reason:'count'},
+      {sku:'RICE5',expectedStock:51,countedStock:-1,reason:'count'},
+      {sku:'RICE5',expectedStock:51,countedStock:1.5,reason:'count'},
+      {sku:'RICE5',expectedStock:51,countedStock:47,reason:''},
+      {sku:'../RICE5',expectedStock:51,countedStock:47,reason:'count'},
+      {sku:'MISSING',expectedStock:0,countedStock:0,reason:'count'}
+    ]) assert.ok((await call('reconcileStockCount',data,adminToken)).error,JSON.stringify(data));
+    assert.equal(await stock('RICE5'),51);
+    assert.equal((await db.collection('inventoryHistory').get()).size,0);
+  });
+});
