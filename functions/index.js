@@ -287,6 +287,39 @@ exports.adjustStock=onCall(opt,async req=>{
   return result;
 });
 
+// Record a supplier delivery with a required reference and atomic stock/audit update.
+exports.receiveStock=onCall(opt,async req=>{
+  await guard(req);
+  const data=req.data||{};
+  if(typeof data.sku!=='string'||! /^[A-Za-z0-9._-]{1,100}$/.test(data.sku.trim()))
+    throw new HttpsError('invalid-argument','A valid product SKU is required.');
+  if(typeof data.quantity!=='number'||!Number.isSafeInteger(data.quantity)||data.quantity<1||data.quantity>100000)
+    throw new HttpsError('invalid-argument','Received quantity must be a whole number from 1 to 100000.');
+  if(typeof data.supplier!=='string'||!data.supplier.trim()||data.supplier.trim().length>120)
+    throw new HttpsError('invalid-argument','Supplier name is required (up to 120 characters).');
+  if(typeof data.reference!=='string'||!data.reference.trim()||data.reference.trim().length>80)
+    throw new HttpsError('invalid-argument','Delivery note or invoice reference is required (up to 80 characters).');
+  const sku=data.sku.trim().toUpperCase();
+  const supplier=data.supplier.trim(), reference=data.reference.trim();
+  const productRef=db.doc(`products/${sku}`);
+  let result;
+  await db.runTransaction(async tx=>{
+    const snap=await tx.get(productRef);
+    if(!snap.exists)throw new HttpsError('not-found','Product not found.');
+    const current=Number(snap.data().stock), next=current+data.quantity;
+    if(!Number.isSafeInteger(current)||current<0||!Number.isSafeInteger(next)||next<0||next>Number.MAX_SAFE_INTEGER)
+      throw new HttpsError('failed-precondition','Received stock would create an invalid stock balance.');
+    tx.update(productRef,{stock:next});
+    tx.set(db.collection('inventoryHistory').doc(),{
+      sku,from:current,to:next,reason:`receipt: ${supplier} | reference: ${reference} | quantity: ${data.quantity}`,
+      type:'supplier_receipt',supplier,reference,quantity:data.quantity,
+      at:FieldValue.serverTimestamp(),changedBy:req.auth.uid
+    });
+    result={sku,from:current,to:next,quantity:data.quantity,supplier,reference};
+  });
+  return result;
+});
+
 // Trusted order workflow: clients cannot change order status or stock flags directly.
 exports.updateOrderStatus=onCall(opt,async req=>{
   if(!req.auth)throw new HttpsError('unauthenticated','Log in first.');

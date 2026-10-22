@@ -51,3 +51,12 @@ test('manual stock adjustments are admin-guarded, bounded, and audited transacti
   assert.match(source,/reason:\x60adjustment: \x24\{data\.reason\.trim\(\)\}\x60/);
   assert.match(source,/tx\.update\(productRef,\{stock:next\}\)[\s\S]*?inventoryHistory/);
 });
+
+
+test('supplier stock receiving is admin-guarded, validates quantities, and audits supplier reference',()=>{
+  assert.match(source,/exports\.receiveStock=onCall\(opt,async req=>\{\s*await guard\(req\)/);
+  assert.match(source,/Received quantity must be a whole number from 1 to 100000/);
+  assert.match(source,/Delivery note or invoice reference is required/);
+  assert.match(source,/type:'supplier_receipt',supplier,reference,quantity:data\.quantity/);
+  assert.match(source,/tx\.update\(productRef,\{stock:next\}\)[\s\S]*?supplier_receipt/);
+});
