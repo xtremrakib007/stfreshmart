@@ -297,3 +297,42 @@ describe('adjustStock',()=>{
     assert.equal((await db.collection('inventoryHistory').get()).size,0);
   });
 });
+
+describe('receiveStock',()=>{
+  test('only active admins can record supplier deliveries',async()=>{
+    const data={sku:'RICE5',quantity:4,supplier:'Supplier Sdn Bhd',reference:'DN-204'};
+    assert.equal(errorStatus(await call('receiveStock',data,staffToken)),'PERMISSION_DENIED');
+    assert.equal(errorStatus(await call('receiveStock',data,customerToken)),'PERMISSION_DENIED');
+    assert.equal(errorStatus(await call('receiveStock',data,inactiveAdminToken)),'PERMISSION_DENIED');
+    assert.equal(await stock('RICE5'),50);
+    assert.equal((await db.collection('inventoryHistory').get()).size,0);
+  });
+
+  test('receives stock and records supplier, reference and admin atomically',async()=>{
+    const r=await call('receiveStock',{sku:' rice5 ',quantity:4,supplier:' Supplier Sdn Bhd ',reference:' DN-204 '},adminToken);
+    assert.deepEqual(r.result,{sku:'RICE5',from:50,to:54,quantity:4,supplier:'Supplier Sdn Bhd',reference:'DN-204'});
+    assert.equal(await stock('RICE5'),54);
+    const rows=(await db.collection('inventoryHistory').get()).docs.map(d=>d.data());
+    assert.equal(rows.length,1);
+    assert.equal(rows[0].type,'supplier_receipt');
+    assert.equal(rows[0].supplier,'Supplier Sdn Bhd');
+    assert.equal(rows[0].reference,'DN-204');
+    assert.equal(rows[0].quantity,4);
+    assert.equal(rows[0].changedBy,'admin');
+    assert.ok(rows[0].at);
+  });
+
+  test('rejects invalid receipt details and missing products without changing stock',async()=>{
+    for(const data of [
+      {sku:'RICE5',quantity:0,supplier:'Supplier',reference:'DN-1'},
+      {sku:'RICE5',quantity:1.5,supplier:'Supplier',reference:'DN-1'},
+      {sku:'RICE5',quantity:100001,supplier:'Supplier',reference:'DN-1'},
+      {sku:'RICE5',quantity:1,supplier:'',reference:'DN-1'},
+      {sku:'RICE5',quantity:1,supplier:'Supplier',reference:''},
+      {sku:'../RICE5',quantity:1,supplier:'Supplier',reference:'DN-1'},
+      {sku:'MISSING',quantity:1,supplier:'Supplier',reference:'DN-1'}
+    ]) assert.ok((await call('receiveStock',data,adminToken)).error,JSON.stringify(data));
+    assert.equal(await stock('RICE5'),50);
+    assert.equal((await db.collection('inventoryHistory').get()).size,0);
+  });
+});
