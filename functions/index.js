@@ -84,6 +84,9 @@ exports.resetStaffPassword=onCall(opt,async req=>{await guard(req);
 // All customer order prices are recalculated here. The browser submits only product IDs and quantities.
 exports.createOrder=onCall({...opt, enforceAppCheck:false},async req=>{
   const data=req.data||{};
+  const requestId=data.requestId;
+  if(typeof requestId!=='string'||! /^[A-Za-z0-9_-]{16,128}$/.test(requestId))
+    throw new HttpsError('invalid-argument','A valid checkout request ID is required.');
   const customer=data.customer||{};
   const method=data.method;
   const delivery=data.delivery||{};
@@ -96,12 +99,6 @@ exports.createOrder=onCall({...opt, enforceAppCheck:false},async req=>{
     throw new HttpsError('invalid-argument','Valid customer name and phone are required.');
   if(!requested||typeof requested!=='object'||Array.isArray(requested)||Object.keys(requested).length<1||Object.keys(requested).length>100)
     throw new HttpsError('invalid-argument','Choose between 1 and 100 products.');
-  const normalizedSkus=new Set();
-  for(const sku of Object.keys(requested)){
-    const normalized=sku.toUpperCase();
-    if(normalizedSkus.has(normalized)) throw new HttpsError('invalid-argument','Duplicate product SKU keys are not allowed.');
-    normalizedSkus.add(normalized);
-  }
   for(const key of ['address','city','state','postcode','date','time','collector','collectorPhone','vehicle','instructions','notes','reason']){
     if(delivery[key]!==undefined&&(typeof delivery[key]!=='string'||delivery[key].length>500))
       throw new HttpsError('invalid-argument','Invalid delivery details.');
@@ -114,6 +111,42 @@ exports.createOrder=onCall({...opt, enforceAppCheck:false},async req=>{
     throw new HttpsError('invalid-argument','Delivery date is required.');
   if(method==='URGENT DELIVERY'&&(!delivery.date||!delivery.time||!delivery.reason))
     throw new HttpsError('invalid-argument','Urgent date, time and reason are required.');
+
+  // Validate request shape and resolve idempotency before checking live stock/prices.
+  // A legitimate retry must still return the original order after stock or catalog changes.
+  const normalizedSkus=new Set();
+  for(const [sku,qty] of Object.entries(requested)){
+    if(typeof sku!=='string'||! /^[A-Za-z0-9._-]{1,100}$/.test(sku))
+      throw new HttpsError('invalid-argument','Invalid product SKU.');
+    const normalized=sku.toUpperCase();
+    if(normalizedSkus.has(normalized))
+      throw new HttpsError('invalid-argument','Duplicate product SKU keys are not allowed.');
+    normalizedSkus.add(normalized);
+    if(typeof qty!=='number'||!Number.isSafeInteger(qty)||qty<1||qty>100000)
+      throw new HttpsError('invalid-argument',`Invalid quantity for ${sku}.`);
+  }
+  const cleanDelivery={};
+  for(const key of ['name','phone','company','address','city','state','postcode','date','time','collector','collectorPhone','vehicle','instructions','notes','reason'])
+    if(typeof delivery[key]==='string')cleanDelivery[key]=delivery[key].trim().slice(0,500);
+  const normalizedCustomer={name:customer.name.trim(),phone:customer.phone.trim(),company:(customer.company||'').trim()};
+  const requestScope=req.auth?req.auth.uid:'guest';
+  const requestKey=crypto.createHash('sha256').update(requestScope+'\\0'+requestId).digest('hex');
+  const fingerprint=crypto.createHash('sha256').update(JSON.stringify({
+    customer:normalizedCustomer,method,delivery:cleanDelivery,
+    items:Object.entries(requested).map(([sku,qty])=>({sku:sku.toUpperCase(),qty})).sort((a,b)=>a.sku.localeCompare(b.sku))
+  })).digest('hex');
+  const requestRef=db.doc(`checkoutRequests/${requestKey}`);
+  const priorRequest=await requestRef.get();
+  if(priorRequest.exists){
+    const saved=priorRequest.data();
+    if(saved.fingerprint!==fingerprint)
+      throw new HttpsError('failed-precondition','This checkout request ID was already used with different order details. Start a new checkout attempt.');
+    const priorOrder=await db.doc(`orders/${saved.orderId}`).get();
+    if(!priorOrder.exists)
+      throw new HttpsError('failed-precondition','The original order record is unavailable. Contact support before retrying.');
+    const existing=priorOrder.data();
+    return {orderId:saved.orderId,lines:existing.items,total:existing.total,currency:existing.currency||'RM',message:existing.message};
+  }
 
   let role='customer';
   if(req.auth){
@@ -156,9 +189,6 @@ exports.createOrder=onCall({...opt, enforceAppCheck:false},async req=>{
   }
   const total=lines.reduce((sum,line)=>sum+line.qty*line.price,0);
   if(!Number.isFinite(total)||total>10000000)throw new HttpsError('failed-precondition','Order total is outside the allowed range.');
-  const cleanDelivery={};
-  for(const key of ['name','phone','company','address','city','state','postcode','date','time','collector','collectorPhone','vehicle','instructions','notes','reason'])
-    if(typeof delivery[key]==='string')cleanDelivery[key]=delivery[key].trim().slice(0,500);
   const currencySnap=await db.doc('settings/main').get();
   const currency=currencySnap.exists&&typeof currencySnap.data().currency==='string'?currencySnap.data().currency:'RM';
   const message=[
@@ -174,9 +204,27 @@ exports.createOrder=onCall({...opt, enforceAppCheck:false},async req=>{
     `Verified total: ${currency}${total.toFixed(2)}`,
     cleanDelivery.instructions||cleanDelivery.notes||''
   ].filter(Boolean).join('\n');
-  const order={customer:{name:customer.name.trim(),phone:customer.phone.trim(),company:(customer.company||'').trim()},method,delivery:cleanDelivery,items:lines,total,status:'Pending',placedBy:role,message,createdAt:FieldValue.serverTimestamp()};
-  const ref=await db.collection('orders').add(order);
-  return {orderId:ref.id,lines,total,currency,message};
+  const order={customer:normalizedCustomer,method,delivery:cleanDelivery,items:lines,total,currency,status:'Pending',placedBy:role,message,createdAt:FieldValue.serverTimestamp()};
+  // A stable request ID makes client retries safe. Scope keys to the authenticated user
+  // (or the guest namespace) and bind each key to the validated request payload.
+  const ref=db.collection('orders').doc();
+  const result=await db.runTransaction(async tx=>{
+    const prior=await tx.get(requestRef);
+    if(prior.exists){
+      const saved=prior.data();
+      if(saved.fingerprint!==fingerprint)
+        throw new HttpsError('failed-precondition','This checkout request ID was already used with different order details. Start a new checkout attempt.');
+      const priorOrder=await tx.get(db.doc(`orders/${saved.orderId}`));
+      if(!priorOrder.exists)
+        throw new HttpsError('failed-precondition','The original order record is unavailable. Contact support before retrying.');
+      const existing=priorOrder.data();
+      return {orderId:saved.orderId,lines:existing.items,total:existing.total,currency:existing.currency||currency,message:existing.message};
+    }
+    tx.create(ref,order);
+    tx.create(requestRef,{fingerprint,orderId:ref.id,createdAt:FieldValue.serverTimestamp()});
+    return {orderId:ref.id,lines,total,currency,message};
+  });
+  return result;
 });
 
 

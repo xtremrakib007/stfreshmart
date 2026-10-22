@@ -5,7 +5,8 @@ const {db,auth,resetEmulators,createUser,call}=require('./helpers');
 
 const pickup={date:'2026-11-01',time:'10:00',collector:'Ali'};
 const customer={name:'Test Customer',phone:'0123456789',company:''};
-const orderData=(items,extra={})=>({customer,method:'SELF PICKUP',delivery:pickup,items,...extra});
+let requestSeq=0;
+const orderData=(items,extra={})=>({requestId:`emulator-checkout-request-${++requestSeq}`,customer,method:'SELF PICKUP',delivery:pickup,items,...extra});
 
 let adminToken,staffToken,inactiveStaffToken,inactiveAdminToken,customerToken;
 
@@ -35,6 +36,49 @@ describe('createOrder',()=>{
     assert.equal(order.status,'Pending');
     assert.equal(order.placedBy,'customer');
     assert.deepEqual(order.items.map(i=>[i.sku,i.qty,i.price]),[['RICE5',2,20],['OIL1',1,7]]);
+  });
+
+  test('returns the original order for a repeated checkout request ID',async()=>{
+    const data=orderData({RICE5:2},{requestId:'same-checkout-request-id-0001'});
+    const first=await call('createOrder',data);
+    const retry=await call('createOrder',data);
+    assert.equal(retry.result.orderId,first.result.orderId);
+    assert.equal(retry.result.total,first.result.total);
+    assert.equal((await db.collection('orders').get()).size,1);
+  });
+
+  test('returns the original order on retry even after stock becomes unavailable',async()=>{
+    const data=orderData({OIL1:4},{requestId:'retry-after-stock-change-0001'});
+    const first=await call('createOrder',data);
+    await db.doc('products/OIL1').update({stock:0,status:'inactive'});
+    const retry=await call('createOrder',data);
+    assert.equal(retry.result.orderId,first.result.orderId);
+    assert.equal(retry.result.total,first.result.total);
+    assert.equal((await db.collection('orders').get()).size,1);
+  });
+
+  test('concurrent retries with the same checkout request ID create one order',async()=>{
+    const data=orderData({RICE5:2},{requestId:'parallel-checkout-request-0001'});
+    const [a,b]=await Promise.all([call('createOrder',data),call('createOrder',data)]);
+    assert.equal(a.result.orderId,b.result.orderId);
+    assert.equal((await db.collection('orders').get()).size,1);
+    assert.equal((await db.collection('checkoutRequests').get()).size,1);
+  });
+
+  test('rejects reuse of a checkout request ID with changed order details',async()=>{
+    const requestId='changed-payload-checkout-0001';
+    const first=await call('createOrder',orderData({RICE5:2},{requestId}));
+    const changed=await call('createOrder',orderData({RICE5:3},{requestId}));
+    assert.equal(errorStatus(changed),'FAILED_PRECONDITION');
+    assert.equal((await db.collection('orders').get()).size,1);
+    assert.equal(first.result.total,40);
+  });
+
+  test('rejects missing or malformed checkout request IDs',async()=>{
+    const missing=orderData({RICE5:1});
+    delete missing.requestId;
+    assert.equal(errorStatus(await call('createOrder',missing)),'INVALID_ARGUMENT');
+    assert.equal(errorStatus(await call('createOrder',orderData({RICE5:1},{requestId:'short'}))),'INVALID_ARGUMENT');
   });
 
   test('applies the highest matching quantity price slab',async()=>{

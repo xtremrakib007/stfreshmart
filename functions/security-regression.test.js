@@ -18,6 +18,14 @@ test('checkout accepts only numeric safe-integer quantities within the limit',()
   assert.match(source,/typeof qty!==\x27number\x27\|\|!Number\.isSafeInteger\(qty\)\|\|qty<1\|\|qty>100000/);
 });
 
+test('checkout requires a stable request ID and stores an idempotency fingerprint',()=>{
+  assert.match(source,/valid checkout request ID is required/);
+  assert.match(source,/crypto\.createHash\('sha256'\)[\s\S]*?checkoutRequests/);
+  assert.match(source,/saved\.fingerprint!==fingerprint/);
+  assert.match(source,/tx\.create\(ref,order\)/);
+  assert.match(source,/tx\.create\(requestRef/);
+});
+
 test('order status changes require active staff and valid order IDs',()=>{
   assert.match(source,/userSnap\.data\(\)\.active!==true\|\|!\[\x27staff\x27,\x27admin\x27\]\.includes\(userSnap\.data\(\)\.role\)/);
   assert.match(source,/A valid order ID and target status are required/);
