@@ -109,7 +109,7 @@ export function Products(){
   async function reconcileStockCount(p:any){
     const rawCount=prompt(`Physical quantity counted for ${p.sku} (system currently shows ${p.stock}):`,String(p.stock));
     if(rawCount===null)return;
-    if(!/^\\d+$/.test(rawCount.trim())||!Number.isSafeInteger(Number(rawCount))||Number(rawCount)<0){
+    if(!/^\d+$/.test(rawCount.trim())||!Number.isSafeInteger(Number(rawCount))||Number(rawCount)<0){
       setMsg('Enter a non-negative whole-number counted quantity.');return;
     }
     const reason=prompt('Count note (for example: monthly count, damaged stock found, shelf recount):');
