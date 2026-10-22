@@ -177,7 +177,7 @@ exports.createOrder=onCall({...opt, enforceAppCheck:false},async req=>{
     `Verified total: ${currency}${total.toFixed(2)}`,
     cleanDelivery.instructions||cleanDelivery.notes||''
   ].filter(Boolean).join('\n');
-  const order={customer:{name:customer.name.trim(),phone:customer.phone.trim(),company:(customer.company||'').trim()},method,delivery:cleanDelivery,items:lines,total,status:'Pending',placedBy:role,message,createdAt:FieldValue.serverTimestamp()};
+  const order={customer:{name:customer.name.trim(),phone:customer.phone.trim(),company:(customer.company||'').trim()},method,delivery:cleanDelivery,items:lines,total,currency,status:'Pending',placedBy:role,message,createdAt:FieldValue.serverTimestamp()};
   // A stable request ID makes client retries safe. Scope keys to the authenticated user
   // (or the guest namespace) and bind each key to the validated request payload.
   const requestScope=req.auth?req.auth.uid:'guest';
@@ -198,7 +198,7 @@ exports.createOrder=onCall({...opt, enforceAppCheck:false},async req=>{
       if(!priorOrder.exists)
         throw new HttpsError('failed-precondition','The original order record is unavailable. Contact support before retrying.');
       const existing=priorOrder.data();
-      return {orderId:saved.orderId,lines:existing.items,total:existing.total,currency,message:existing.message};
+      return {orderId:saved.orderId,lines:existing.items,total:existing.total,currency:existing.currency||currency,message:existing.message};
     }
     tx.create(ref,order);
     tx.create(requestRef,{fingerprint,orderId:ref.id,createdAt:FieldValue.serverTimestamp()});
