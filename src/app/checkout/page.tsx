@@ -53,19 +53,37 @@ export default function Checkout(){
       }catch{}
     }
 
+    const payload={
+      customer:{name:f.name.trim(),phone:f.phone.trim(),company:(f.company||'').trim()},
+      method:M[m],
+      delivery:f,
+      items:cart
+    };
+    const fingerprint=JSON.stringify(payload);
+    let requestId='';
+    try{
+      const saved=JSON.parse(sessionStorage.getItem('fh-checkout-request')||'null');
+      requestId=saved?.fingerprint===fingerprint&&typeof saved?.requestId==='string'
+        ?saved.requestId:'';
+      if(!requestId){
+        requestId=typeof crypto!=='undefined'&&typeof crypto.randomUUID==='function'
+          ?crypto.randomUUID()
+          :Date.now().toString(36)+'-'+Math.random().toString(36).slice(2)+'-'+Math.random().toString(36).slice(2);
+        sessionStorage.setItem('fh-checkout-request',JSON.stringify({fingerprint,requestId}));
+      }
+    }catch{
+      requestId=Date.now().toString(36)+'-'+Math.random().toString(36).slice(2)+'-'+Math.random().toString(36).slice(2);
+    }
+
     try{
       const createOrder=httpsCallable(fns,'createOrder');
-      const result=await createOrder({
-        customer:{name:f.name.trim(),phone:f.phone.trim(),company:(f.company||'').trim()},
-        method:M[m],
-        delivery:f,
-        items:cart
-      });
+      const result=await createOrder({...payload,requestId});
       const verified=result.data as {orderId:string;lines:{sku:string;name:string;unit:string;qty:number;price:number}[];total:number;currency:string};
       const verifiedLines=verified.lines.map(l=>({sku:l.sku,name:l.name,unit:l.unit,qty:l.qty,price:l.price}));
       const address=m==='pickup'?'':[f.address,f.city,f.state,f.postcode].join(', ');
       const when=[f.date,f.time].filter(Boolean).join(' ');
       const msg=buildMessage({customer:f.name,phone:f.phone,company:f.company||'',method:M[m],address,when,lines:verifiedLines,total:verified.total,currency:verified.currency||settings.currency,notes:[f.instructions,f.notes].filter(Boolean).join('. '),urgent:f.reason});
+      try{sessionStorage.removeItem('fh-checkout-request')}catch{}
       clear();window.location.href=waLink(settings.whatsappNumber,msg);
     }catch(e:any){
       const code=e?.code||'';
