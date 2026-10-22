@@ -52,8 +52,10 @@ service cloud.firestore {
       allow read: if resource.data.status == 'active' || isStaff();
       // Private cost and minimum-price fields must never be stored here.
       allow create: if isAdmin()
+        && request.resource.data.stock == 0
         && !request.resource.data.keys().hasAny(['purchasePrice', 'minPricePcs', 'minPriceCtn']);
       allow update: if isAdmin()
+        && request.resource.data.stock == resource.data.stock
         && !request.resource.data.keys().hasAny(['purchasePrice', 'minPricePcs', 'minPriceCtn']);
       allow delete: if isAdmin();
     }
@@ -87,19 +89,8 @@ service cloud.firestore {
     }
     match /inventoryHistory/{id} {
       allow read: if isStaff();
-      // Admins can record manual stock edits from the product editor; order-driven
-      // stock changes are written atomically by updateOrderStatus using Admin SDK.
-      allow create: if isAdmin()
-        && request.resource.data.keys().hasOnly(['sku', 'from', 'to', 'reason', 'at'])
-        && request.resource.data.sku is string
-        && request.resource.data.sku.size() > 0
-        && request.resource.data.sku.size() <= 100
-        && request.resource.data.from is number
-        && request.resource.data.from >= 0
-        && request.resource.data.to is number
-        && request.resource.data.to >= 0
-        && request.resource.data.reason == 'manual'
-        && request.resource.data.at == request.time;
+      // Stock movements are recorded only by trusted server-side callables.
+      allow create: if false;
       allow update, delete: if false;
     }
     match /suppliers/{id} {

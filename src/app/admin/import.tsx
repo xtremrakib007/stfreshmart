@@ -161,7 +161,7 @@ export function ImportTab(){
               ...out[existingIdx],
               name:name||out[existingIdx].name,
               category:category!=='General'?category:out[existingIdx].category,
-              stock:stock||out[existingIdx].stock,
+              stock:out[existingIdx].stock,
               unit:unit||out[existingIdx].unit,
               retailPrice:rp||out[existingIdx].retailPrice,
               promoPrice:promoPrice||out[existingIdx].promoPrice,
@@ -182,7 +182,7 @@ export function ImportTab(){
           sku,
           name,
           category,
-          stock,
+          stock:existingProd?.stock??0,
           unit,
           retailPrice:rp,
           promoPrice,
@@ -213,6 +213,7 @@ export function ImportTab(){
         const existingProd=products.find(prod=>prod.sku.toUpperCase()===r.sku.toUpperCase()||prod.id.toUpperCase()===r.sku.toUpperCase());
         const data:any = {
           ...p,
+          stock: existingProd?.stock ?? 0,
           description: p.description || existingProd?.description || '',
           status: existingProd?.status || 'active'
         };
@@ -286,7 +287,7 @@ export function ImportTab(){
     <div className="space-y-3 rounded-lg border border-line bg-white p-4">
       <h2 className="font-bold text-base">1. Import Products from Excel / CSV</h2>
       <p className="text-sm text-ink/70">
-        Upload a file with columns: <code className="bg-frost px-1.5 py-0.5 rounded text-xs font-semibold">SKU</code>, <code className="bg-frost px-1.5 py-0.5 rounded text-xs font-semibold">NAME</code>, <code className="bg-frost px-1.5 py-0.5 rounded text-xs font-semibold">CATEGORY</code>, <code className="bg-frost px-1.5 py-0.5 rounded text-xs font-semibold">STOCK</code>, <code className="bg-frost px-1.5 py-0.5 rounded text-xs font-semibold">UNIT</code>, <code className="bg-frost px-1.5 py-0.5 rounded text-xs font-semibold">RETAIL PRICE</code>, <code className="bg-frost px-1.5 py-0.5 rounded text-xs font-semibold">STAFF PRICE</code>, and optional <code className="bg-frost px-1.5 py-0.5 rounded text-xs font-semibold">IMAGE_URL</code>.
+        Stock values in the spreadsheet are preview-only; new products start at zero and existing stock is preserved. Use the Inventory tab to record stock movements. Upload a file with columns: <code className="bg-frost px-1.5 py-0.5 rounded text-xs font-semibold">SKU</code>, <code className="bg-frost px-1.5 py-0.5 rounded text-xs font-semibold">NAME</code>, <code className="bg-frost px-1.5 py-0.5 rounded text-xs font-semibold">CATEGORY</code>, <code className="bg-frost px-1.5 py-0.5 rounded text-xs font-semibold">STOCK</code>, <code className="bg-frost px-1.5 py-0.5 rounded text-xs font-semibold">UNIT</code>, <code className="bg-frost px-1.5 py-0.5 rounded text-xs font-semibold">RETAIL PRICE</code>, <code className="bg-frost px-1.5 py-0.5 rounded text-xs font-semibold">STAFF PRICE</code>, and optional <code className="bg-frost px-1.5 py-0.5 rounded text-xs font-semibold">IMAGE_URL</code>.
       </p>
       <input type="file" accept=".csv,.xls,.xlsx" onChange={e=>e.target.files&&load(e.target.files[0])}/>
       {errs.length>0&&<ul role="alert" className="list-disc pl-5 text-sm text-label">{errs.slice(0,20).map(x=><li key={x}>{x}</li>)}</ul>}
