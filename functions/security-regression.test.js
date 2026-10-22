@@ -72,9 +72,9 @@ test('physical stock count reconciliation checks stale balances and records vari
 
 
 test('supplier directory writes are admin-guarded and validate contact fields',()=>{
-  assert.match(source,/exports\\.saveSupplier=onCall\\(opt,async req=>\\{\\s*await guard\\(req\\)/);
+  assert.match(source,/exports\.saveSupplier=onCall\(opt,async req=>\{\s*await guard\(req\)/);
   assert.match(source,/Supplier name is required/);
   assert.match(source,/Enter a valid supplier email address/);
   assert.match(source,/Supplier ID is invalid/);
-  assert.match(source,/updatedBy:req\\.auth\\.uid/);
+  assert.match(source,/updatedBy:req\.auth\.uid/);
 });
