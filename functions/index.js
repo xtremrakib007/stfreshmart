@@ -425,3 +425,35 @@ exports.updateOrderStatus=onCall(opt,async req=>{
   });
   return {ok:true,status:to};
 });
+
+
+// Supplier directory writes are server-validated; supplier records are never public.
+exports.saveSupplier=onCall(opt,async req=>{
+  await guard(req);
+  const data=req.data||{};
+  const fields=['name','contactName','phone','email','address','notes'];
+  const limits={name:160,contactName:120,phone:40,email:254,address:500,notes:2000};
+  const clean={};
+  for(const field of fields){
+    const value=data[field]===undefined?'':data[field];
+    if(typeof value!=='string'||value.length>limits[field])
+      throw new HttpsError('invalid-argument',`Supplier ${field} must be text up to ${limits[field]} characters.`);
+    clean[field]=value.trim();
+  }
+  if(!clean.name)throw new HttpsError('invalid-argument','Supplier name is required.');
+  if(clean.email&&!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(clean.email))
+    throw new HttpsError('invalid-argument','Enter a valid supplier email address.');
+  if(data.active!==undefined&&typeof data.active!=='boolean')
+    throw new HttpsError('invalid-argument','Supplier active status must be true or false.');
+  const supplierId=data.supplierId===undefined?'':data.supplierId;
+  if(supplierId!==''&&(typeof supplierId!=='string'||! /^[A-Za-z0-9_-]{1,128}$/.test(supplierId)))
+    throw new HttpsError('invalid-argument','Supplier ID is invalid.');
+  const ref=supplierId?db.doc(`suppliers/${supplierId}`):db.collection('suppliers').doc();
+  const previous=supplierId?await ref.get():null;
+  if(supplierId&&!previous.exists)throw new HttpsError('not-found','Supplier not found.');
+  const active=data.active===undefined?(previous?previous.data().active!==false:true):data.active;
+  const record={...clean,active,updatedAt:FieldValue.serverTimestamp(),updatedBy:req.auth.uid};
+  if(!previous)record.createdAt=FieldValue.serverTimestamp();
+  await ref.set(record,{merge:true});
+  return {supplierId:ref.id,ok:true};
+});
