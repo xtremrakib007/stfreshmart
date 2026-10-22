@@ -106,6 +106,29 @@ export function Products(){
     }finally{setAdjustingStock(false);}
   }
 
+  async function receiveStock(p:any){
+    const rawQuantity=prompt(`Quantity received for ${p.sku}:`,'1');
+    if(rawQuantity===null)return;
+    if(!/^\\d+$/.test(rawQuantity.trim())||Number(rawQuantity)<1||Number(rawQuantity)>100000){
+      setMsg('Enter a whole-number quantity from 1 to 100000.');return;
+    }
+    const supplier=prompt('Supplier name:');
+    if(supplier===null)return;
+    if(!supplier.trim()||supplier.trim().length>120){setMsg('Supplier name is required (up to 120 characters).');return;}
+    const reference=prompt('Delivery note / invoice reference:');
+    if(reference===null)return;
+    if(!reference.trim()||reference.trim().length>80){setMsg('Delivery note or invoice reference is required (up to 80 characters).');return;}
+    setAdjustingStock(true);setMsg('Recording supplier delivery...');
+    try{
+      const receive=httpsCallable(fns,'receiveStock');
+      const response=await receive({sku:p.sku,quantity:Number(rawQuantity),supplier:supplier.trim(),reference:reference.trim()});
+      const data=response.data as {from:number;to:number;quantity:number;reference:string};
+      setMsg(`${p.sku}: received ${data.quantity} ${p.unit}; stock ${data.from} → ${data.to} (ref ${data.reference}).`);
+    }catch{
+      setMsg('Could not record supplier delivery. Check admin permissions, product SKU, and stock balance.');
+    }finally{setAdjustingStock(false);}
+  }
+
   async function upload(file:File){
     setUploading(true); setMsg('Uploading image...');
     try{
@@ -304,6 +327,9 @@ export function Products(){
                   <button onClick={()=>edit(p)} className="text-xs font-semibold btn-alt py-1 px-2.5">Edit</button>
                   {role==='admin' && (
                     <button disabled={adjustingStock} onClick={()=>adjustStock(p)} className="text-xs font-semibold btn-alt py-1 px-2.5 disabled:opacity-50">{adjustingStock?'Saving...':'Adjust stock'}</button>
+                  )}
+                  {role==='admin' && (
+                    <button disabled={adjustingStock} onClick={()=>receiveStock(p)} className="text-xs font-semibold btn-alt py-1 px-2.5 disabled:opacity-50">{adjustingStock?'Saving...':'Receive stock'}</button>
                   )}
                   {role==='admin' && (
                     <button onClick={()=>confirm('Delete this product?')&&deleteDoc(doc(db,'products',p.id))} className="text-xs text-label hover:underline p-1">Delete</button>
