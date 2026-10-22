@@ -16,11 +16,10 @@ service firebase.storage {
         && request.resource.contentType.matches('image/.*');
     }
 
-    // Public read access is retained for existing product images. All uploads
-    // outside the product-image directory are denied unless a future rule allows them.
+    // Public read access is retained only for existing product images.
+    // All other paths are private and client writes remain denied.
     match /{allPaths=**} {
-      allow read: if true;
-      allow write: if false;
+      allow read, write: if false;
     }
   }
 }
