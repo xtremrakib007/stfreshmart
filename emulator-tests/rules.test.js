@@ -59,7 +59,10 @@ describe('products',()=>{
     await assertFails(getDoc(doc(as('inactiveStaff'),'products/HIDDEN1')));
   });
   test('only active admins can write products',async()=>{
-    await assertSucceeds(setDoc(doc(as('admin'),'products/NEW1'),{name:'New',status:'active',retailPrice:1,stock:1}));
+    await assertSucceeds(setDoc(doc(as('admin'),'products/NEW1'),{name:'New',status:'active',retailPrice:1,stock:0}));
+    await assertFails(setDoc(doc(as('admin'),'products/NEW_STOCK'),{name:'New',status:'active',retailPrice:1,stock:1}));
+    await assertFails(updateDoc(doc(as('admin'),'products/ACTIVE1'),{stock:6}));
+    await assertSucceeds(updateDoc(doc(as('admin'),'products/ACTIVE1'),{retailPrice:11}));
     await assertFails(setDoc(doc(as('staff'),'products/NEW2'),{name:'New',status:'active'}));
     await assertFails(setDoc(doc(as('inactiveAdmin'),'products/NEW3'),{name:'New',status:'active'}));
     await assertFails(updateDoc(doc(customer(),'products/ACTIVE1'),{retailPrice:0}));
@@ -141,8 +144,8 @@ describe('orders',()=>{
 
 describe('inventoryHistory',()=>{
   const manual=()=>({sku:'ACTIVE1',from:5,to:6,reason:'manual',at:serverTimestamp()});
-  test('admins can record valid manual stock edits',async()=>{
-    await assertSucceeds(addDoc(collection(as('admin'),'inventoryHistory'),manual()));
+  test('stock history can only be written by trusted server-side functions',async()=>{
+    await assertFails(addDoc(collection(as('admin'),'inventoryHistory'),manual()));
   });
   test('invalid or non-admin history entries are rejected',async()=>{
     await assertFails(addDoc(collection(as('staff'),'inventoryHistory'),manual()));
