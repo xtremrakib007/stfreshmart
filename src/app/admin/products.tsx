@@ -10,6 +10,7 @@ const blank:any={sku:'',name:'',category:'Beef',description:'',unit:'KG',stock:0
 export function Products(){
   const {products,role}=useStore();const [f,setF]=useState<any>(blank);const [msg,setMsg]=useState('');const [old,setOld]=useState<any>(null);
   const [uploading,setUploading]=useState(false);
+  const [adjustingStock,setAdjustingStock]=useState(false);
   const [migrating,setMigrating]=useState(false);
   const [privatePrices,setPrivatePrices]=useState<Record<string,any>>({});
   useEffect(()=>{
@@ -85,6 +86,26 @@ export function Products(){
       if(role==='admin')setPrivatePrices(prev=>({...prev,[id]:{purchasePrice:Number(purchasePrice)||0,minPricePcs:Number(minPricePcs)||0,minPriceCtn:Number(minPriceCtn)||0}}));
     }catch{setMsg('Could not save. Check your connection and permissions.')}
   }
+  async function adjustStock(p:any){
+    const rawDelta=prompt(`Stock change for ${p.sku} (use a negative number to remove stock):`,'0');
+    if(rawDelta===null)return;
+    if(!/^-?\\d+$/.test(rawDelta.trim())||Number(rawDelta)===0||Math.abs(Number(rawDelta))>100000){
+      setMsg('Enter a non-zero whole-number stock change within 100000 units.');return;
+    }
+    const reason=prompt('Reason (for example: supplier delivery, damaged goods, stock count):');
+    if(reason===null)return;
+    if(!reason.trim()||reason.trim().length>200){setMsg('A reason of 1–200 characters is required.');return;}
+    setAdjustingStock(true);setMsg('Saving stock adjustment...');
+    try{
+      const adjust=httpsCallable(fns,'adjustStock');
+      const result=await adjust({sku:p.sku,delta:Number(rawDelta),reason:reason.trim()});
+      const data=result.data as {from:number;to:number};
+      setMsg(`${p.sku}: stock adjusted from ${data.from} to ${data.to} ${p.unit}.`);
+    }catch(err:any){
+      setMsg(err?.code==='functions/failed-precondition'?'Adjustment rejected: stock cannot become negative.':'Stock adjustment failed. Check admin permissions and try again.');
+    }finally{setAdjustingStock(false);}
+  }
+
   async function upload(file:File){
     setUploading(true); setMsg('Uploading image...');
     try{
@@ -281,6 +302,9 @@ export function Products(){
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <button onClick={()=>edit(p)} className="text-xs font-semibold btn-alt py-1 px-2.5">Edit</button>
+                  {role==='admin' && (
+                    <button disabled={adjustingStock} onClick={()=>adjustStock(p)} className="text-xs font-semibold btn-alt py-1 px-2.5 disabled:opacity-50">{adjustingStock?'Saving...':'Adjust stock'}</button>
+                  )}
                   {role==='admin' && (
                     <button onClick={()=>confirm('Delete this product?')&&deleteDoc(doc(db,'products',p.id))} className="text-xs text-label hover:underline p-1">Delete</button>
                   )}
