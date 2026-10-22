@@ -43,3 +43,11 @@ test('order status changes and stock history remain in one transaction',()=>{
   assert.match(source,/tx\.update\(orderRef,\{status:to/);
   assert.match(source,/tx\.set\(db\.collection\(\x27inventoryHistory\x27\)\.doc\(\)/);
 });
+
+test('manual stock adjustments are admin-guarded, bounded, and audited transactionally',()=>{
+  assert.match(source,/exports\.adjustStock=onCall\(opt,async req=>\{\s*await guard\(req\)/);
+  assert.match(source,/Stock change must be a non-zero whole number/);
+  assert.match(source,/This adjustment would create invalid or negative stock/);
+  assert.match(source,/reason:\x60adjustment: \x24\{data\.reason\.trim\(\)\}\x60/);
+  assert.match(source,/tx\.update\(productRef,\{stock:next\}\)[\s\S]*?inventoryHistory/);
+});

@@ -257,3 +257,43 @@ describe('migratePrivateProductFields',()=>{
     assert.equal((await call('migratePrivateProductFields',{},adminToken)).result.migrated,0);
   });
 });
+
+describe('adjustStock',()=>{
+  test('only active admins can adjust stock',async()=>{
+    assert.equal(errorStatus(await call('adjustStock',{sku:'RICE5',delta:2,reason:'delivery received'},staffToken)),'PERMISSION_DENIED');
+    assert.equal(errorStatus(await call('adjustStock',{sku:'RICE5',delta:2,reason:'delivery received'},customerToken)),'PERMISSION_DENIED');
+    assert.equal(errorStatus(await call('adjustStock',{sku:'RICE5',delta:2,reason:'delivery received'},inactiveAdminToken)),'PERMISSION_DENIED');
+    assert.equal(await stock('RICE5'),50);
+  });
+
+  test('adjusts stock and writes audit history atomically',async()=>{
+    const r=await call('adjustStock',{sku:' rice5 ',delta:7,reason:'Supplier delivery PO-104'},adminToken);
+    assert.deepEqual(r.result,{sku:'RICE5',from:50,to:57});
+    assert.equal(await stock('RICE5'),57);
+    const rows=(await db.collection('inventoryHistory').get()).docs.map(d=>d.data());
+    assert.equal(rows.length,1);
+    assert.equal(rows[0].sku,'RICE5');
+    assert.equal(rows[0].from,50);
+    assert.equal(rows[0].to,57);
+    assert.equal(rows[0].reason,'adjustment: Supplier delivery PO-104');
+    assert.equal(rows[0].changedBy,'admin');
+    assert.ok(rows[0].at);
+  });
+
+  test('rejects invalid changes, missing products and negative resulting stock',async()=>{
+    for(const data of [
+      {sku:'RICE5',delta:0,reason:'count'},
+      {sku:'RICE5',delta:1.5,reason:'count'},
+      {sku:'RICE5',delta:100001,reason:'count'},
+      {sku:'RICE5',delta:1,reason:''},
+      {sku:'../RICE5',delta:1,reason:'count'},
+      {sku:'MISSING',delta:1,reason:'count'}
+    ]){
+      const r=await call('adjustStock',data,adminToken);
+      assert.ok(r.error,JSON.stringify(data));
+    }
+    assert.equal(errorStatus(await call('adjustStock',{sku:'OIL1',delta:-6,reason:'count correction'},adminToken)),'FAILED_PRECONDITION');
+    assert.equal(await stock('OIL1'),5);
+    assert.equal((await db.collection('inventoryHistory').get()).size,0);
+  });
+});
