@@ -1,8 +1,21 @@
-node_modules
-.next
-out
-.env*.local
-.firebase
-functions/node_modules
+# Dependencies and generated build output
+node_modules/
+.next/
+out/
 *.tsbuildinfo
+
+# Local environment files and secrets
+.env*
+!.env.example
+.firebase/
+.runtimeconfig.json
+serviceAccount*.json
+*service-account*.json
+*.pem
+*.key
+
+# Local debug output
 *-debug.log
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
