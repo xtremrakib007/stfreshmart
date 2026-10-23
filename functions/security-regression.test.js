@@ -80,4 +80,7 @@ test('supplier directory writes are admin-guarded and validate contact fields',(
 });
 
 
-test('checkout App Check enforcement is opt-in through an explicit environment flag',()=>{\n  assert.match(source,/const checkoutAppCheckEnforced=process\\.env\\.ENFORCE_CHECKOUT_APP_CHECK===\\x27true\\x27/);\n  assert.match(source,/onCall\\(\\{\\.\\.\\.opt, enforceAppCheck:checkoutAppCheckEnforced\\}/);\n});\n
+test('checkout App Check enforcement is opt-in through an explicit environment flag',()=>{
+  assert.match(source,/const checkoutAppCheckEnforced=process\.env\.ENFORCE_CHECKOUT_APP_CHECK==='true'/);
+  assert.match(source,/onCall\(\{\.\.\.opt, enforceAppCheck:checkoutAppCheckEnforced\}/);
+});
