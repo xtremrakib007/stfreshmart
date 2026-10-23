@@ -296,18 +296,23 @@ exports.createOrder=onCall({...opt, enforceAppCheck:checkoutAppCheckEnforced},as
 });
 
 
-// One-time admin migration: move legacy private pricing fields out of readable product documents.
-// Safe to rerun; existing private values are merged before legacy fields are deleted.
+// Admin-only migration preview and execution for legacy private product pricing.
+// Preview is read-only; execute only after an operator has backed up Firestore.
 exports.migratePrivateProductFields=onCall(opt,async req=>{
   await guard(req);
+  const dryRun=req.data?.dryRun===true;
   const snap=await db.collection('products').get();
-  let migrated=0,staffPricesMigrated=0;
+  let migrated=0,staffPricesMigrated=0,privateFieldsFound=0,legacyStaffPricesFound=0;
+  let existingPrivateDocs=0,existingStaffPriceDocs=0;
   for(let start=0;start<snap.docs.length;start+=150){
-    // Up to three writes per product; keep each batch below Firestore's 500-write limit.
     const docs=snap.docs.slice(start,start+150);
     const staffRefs=docs.map(product=>db.doc(`staffPrices/${product.id}`));
-    const existingStaffPrices=await db.getAll(...staffRefs);
+    const privateRefs=docs.map(product=>db.doc(`productPrivate/${product.id}`));
+    const [existingStaffPrices,existingPrivatePrices]=await Promise.all([
+      db.getAll(...staffRefs),db.getAll(...privateRefs)
+    ]);
     const batch=db.batch();
+    let batchHasWrites=false;
     for(let i=0;i<docs.length;i++){
       const product=docs[i],p=product.data();
       const privateData={};
@@ -316,25 +321,42 @@ exports.migratePrivateProductFields=onCall(opt,async req=>{
       }
       const remove={};
       for(const key of Object.keys(privateData))remove[key]=FieldValue.delete();
+      if(Object.keys(privateData).length){
+        privateFieldsFound+=Object.keys(privateData).length;
+        if(!dryRun){
+          batch.set(privateRefs[i],privateData,{merge:true});
+          batchHasWrites=true;
+        }
+      }
+      if(existingPrivatePrices[i].exists)existingPrivateDocs++;
       if(Object.prototype.hasOwnProperty.call(p,'staffPrice')){
         const legacyPrice=Number(p.staffPrice);
+        legacyStaffPricesFound++;
         if(!existingStaffPrices[i].exists&&Number.isFinite(legacyPrice)&&legacyPrice>=0){
-          batch.set(staffRefs[i],{price:legacyPrice});
           staffPricesMigrated++;
+          if(!dryRun){
+            batch.set(staffRefs[i],{price:legacyPrice});
+            batchHasWrites=true;
+          }
         }
         remove.staffPrice=FieldValue.delete();
       }
-      if(Object.keys(privateData).length){
-        batch.set(db.doc(`productPrivate/${product.id}`),privateData,{merge:true});
-      }
+      if(existingStaffPrices[i].exists)existingStaffPriceDocs++;
       if(Object.keys(remove).length){
-        batch.update(product.ref,remove);
         migrated++;
+        if(!dryRun){
+          batch.update(product.ref,remove);
+          batchHasWrites=true;
+        }
       }
     }
-    await batch.commit();
+    if(!dryRun&&batchHasWrites)await batch.commit();
   }
-  return {scanned:snap.size,migrated,staffPricesMigrated,message:'Private product pricing fields migrated and removed from public product documents.'};
+  return {
+    dryRun,scanned:snap.size,migrated,staffPricesMigrated,
+    privateFieldsFound,legacyStaffPricesFound,existingPrivateDocs,existingStaffPriceDocs,
+    message:dryRun?'Read-only preview completed. No documents were changed.':'Private product pricing fields migrated and removed from public product documents.'
+  };
 });
 
 // Admin-only stock adjustment. The stock mutation and audit record commit atomically.

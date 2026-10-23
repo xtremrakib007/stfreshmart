@@ -12,6 +12,7 @@ export function Products(){
   const [uploading,setUploading]=useState(false);
   const [adjustingStock,setAdjustingStock]=useState(false);
   const [migrating,setMigrating]=useState(false);
+  const [migrationPreview,setMigrationPreview]=useState<any>(null);
   const [privatePrices,setPrivatePrices]=useState<Record<string,any>>({});
   useEffect(()=>{
     if(role!=='admin'){setPrivatePrices({});return}
@@ -162,19 +163,33 @@ export function Products(){
       setUploading(false);
     }
   }
+  async function previewPrivateFields(){
+    setMigrating(true);setMsg('Previewing legacy private price fields...');
+    try{
+      const runMigration=httpsCallable(fns,'migratePrivateProductFields');
+      const result=await runMigration({dryRun:true});
+      setMigrationPreview(result.data);
+      const data=result.data as {scanned:number,migrated:number,staffPricesMigrated:number,privateFieldsFound:number};
+      setMsg(`Preview only: ${data.scanned} products scanned; ${data.migrated} would be cleaned; ${data.privateFieldsFound} private fields found; ${data.staffPricesMigrated} staff prices would be migrated. No changes made.`);
+    }catch{
+      setMsg('Migration preview failed. No changes were made.');
+    }finally{setMigrating(false)}
+  }
+
   async function migratePrivateFields(){
-    if(!confirm('Move legacy product cost and minimum-price fields into the admin-only collection? This can be safely rerun.'))return;
+    if(!confirm('Move legacy product cost and minimum-price fields into the admin-only collection? Back up Firestore and review the preview first.'))return;
     setMigrating(true);setMsg('Migrating private product fields...');
     try{
       const runMigration=httpsCallable(fns,'migratePrivateProductFields');
-      const result=await runMigration({});
-      const data=result.data as {scanned:number;migrated:number};
+      const result=await runMigration({dryRun:false});
+      const data=result.data as {scanned:number,migrated:number,staffPricesMigrated:number};
       const privateSnap=await getDocs(collection(db,'productPrivate'));
       const next:Record<string,any>={};
       privateSnap.docs.forEach(d=>{next[d.id]=d.data()});
       setPrivatePrices(next);
-      setMsg(`Migration complete: scanned ${data.scanned} products; migrated ${data.migrated} products.`);
-    }catch(err:any){
+      setMigrationPreview(null);
+      setMsg(`Migration complete: scanned ${data.scanned} products; cleaned ${data.migrated} products; staff prices migrated: ${data.staffPricesMigrated}. Verify sample documents before deploying rules.`);
+    }catch{
       setMsg('Migration failed. Do not deploy the new security rules until this is resolved.');
     }finally{setMigrating(false)}
   }
@@ -281,7 +296,11 @@ export function Products(){
           <button className="btn flex-1" disabled={uploading} onClick={save}>{uploading?'Uploading...':'Save product'}</button>
           {old&&<button className="btn-alt" onClick={()=>{setF(blank);setOld(null)}}>Cancel</button>}
         </div>
-        {role==='admin'&&<button type="button" className="btn-alt w-full text-xs" disabled={migrating} onClick={migratePrivateFields}>{migrating?'Migrating private fields...':'🔐 Migrate legacy private price fields'}</button>}
+        {role==='admin'&&<>
+          <button type="button" className="btn-alt w-full text-xs" disabled={migrating} onClick={previewPrivateFields}>{migrating?'Checking legacy fields...':'🔎 Preview private price migration (read-only)'}</button>
+          <button type="button" className="btn-alt w-full text-xs" disabled={migrating||!migrationPreview} onClick={migratePrivateFields}>{migrating?'Migrating private fields...':'🔐 Run private price migration'}</button>
+          {migrationPreview&&<p className="text-xs text-ink/60">Preview last run: {migrationPreview.scanned} scanned · {migrationPreview.migrated} public records to clean · {migrationPreview.privateFieldsFound} private fields · {migrationPreview.staffPricesMigrated} staff prices to migrate. This preview is read-only and may become stale if products change.</p>}
+        </>}
         {msg&&<p role="status" className="text-xs font-medium text-brine">{msg}</p>}
       </div>
 
