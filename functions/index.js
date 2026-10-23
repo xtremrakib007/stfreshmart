@@ -235,28 +235,40 @@ exports.createOrder=onCall({...opt, enforceAppCheck:checkoutAppCheckEnforced},as
 exports.migratePrivateProductFields=onCall(opt,async req=>{
   await guard(req);
   const snap=await db.collection('products').get();
-  let migrated=0;
-  for(let start=0;start<snap.docs.length;start+=200){
-    // Each migrated product can require two writes; stay below Firestore's 500-write batch limit.
-    const docs=snap.docs.slice(start,start+200);
+  let migrated=0,staffPricesMigrated=0;
+  for(let start=0;start<snap.docs.length;start+=150){
+    // Up to three writes per product; keep each batch below Firestore's 500-write limit.
+    const docs=snap.docs.slice(start,start+150);
+    const staffRefs=docs.map(product=>db.doc(`staffPrices/${product.id}`));
+    const existingStaffPrices=await db.getAll(...staffRefs);
     const batch=db.batch();
-    for(const product of docs){
-      const p=product.data();
+    for(let i=0;i<docs.length;i++){
+      const product=docs[i],p=product.data();
       const privateData={};
       for(const key of ['purchasePrice','minPricePcs','minPriceCtn']){
         if(Object.prototype.hasOwnProperty.call(p,key)&&p[key]!==undefined)privateData[key]=p[key];
       }
+      const remove={};
+      for(const key of Object.keys(privateData))remove[key]=FieldValue.delete();
+      if(Object.prototype.hasOwnProperty.call(p,'staffPrice')){
+        const legacyPrice=Number(p.staffPrice);
+        if(!existingStaffPrices[i].exists&&Number.isFinite(legacyPrice)&&legacyPrice>=0){
+          batch.set(staffRefs[i],{price:legacyPrice});
+          staffPricesMigrated++;
+        }
+        remove.staffPrice=FieldValue.delete();
+      }
       if(Object.keys(privateData).length){
         batch.set(db.doc(`productPrivate/${product.id}`),privateData,{merge:true});
-        const remove={};
-        for(const key of Object.keys(privateData))remove[key]=FieldValue.delete();
+      }
+      if(Object.keys(remove).length){
         batch.update(product.ref,remove);
         migrated++;
       }
     }
     await batch.commit();
   }
-  return {scanned:snap.size,migrated,message:'Private product fields migrated and removed from public product documents.'};
+  return {scanned:snap.size,migrated,staffPricesMigrated,message:'Private product pricing fields migrated and removed from public product documents.'};
 });
 
 // Admin-only stock adjustment. The stock mutation and audit record commit atomically.
