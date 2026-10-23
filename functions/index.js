@@ -523,10 +523,17 @@ exports.updateOrderStatus=onCall(opt,async req=>{
 // candidate is rechecked transactionally so acceptance/cancellation cannot race expiry.
 exports.expireStockReservations=onSchedule({schedule:'every 10 minutes',timeZone:'Asia/Kuala_Lumpur',region:'asia-southeast1',maxInstances:1},async()=>{
   const now=Timestamp.now();
-  const expired=await db.collection('orders')
-    .where('reservationExpiresAt','<=',now)
-    .limit(100).get();
-  for(const candidate of expired.docs){
+  let cursor=null;
+  while(true){
+    let query=db.collection('orders')
+      .where('reservationExpiresAt','<=',now)
+      .orderBy('reservationExpiresAt')
+      .limit(100);
+    if(cursor)query=query.startAfter(cursor);
+    const expired=await query.get();
+    if(expired.empty)break;
+    // Move past failed records too, so one malformed reservation cannot starve later pages.
+    for(const candidate of expired.docs){
     const orderRef=candidate.ref;
     try{
       await db.runTransaction(async tx=>{
@@ -577,6 +584,9 @@ exports.expireStockReservations=onSchedule({schedule:'every 10 minutes',timeZone
     }catch(error){
       console.error('Failed to release expired stock reservation.',{orderId:orderRef.id,error});
     }
+    }
+    cursor=expired.docs[expired.docs.length-1];
+    if(expired.size<100)break;
   }
 });
 

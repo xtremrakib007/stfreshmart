@@ -1,7 +1,7 @@
 'use strict';
 const {test,beforeEach,describe}=require('node:test');
 const assert=require('node:assert/strict');
-const {db,auth,resetEmulators,createUser,call}=require('./helpers');
+const {admin,db,auth,resetEmulators,createUser,call}=require('./helpers');
 
 const pickup={date:'2026-11-01',time:'10:00',collector:'Ali'};
 const customer={name:'Test Customer',phone:'0123456789',company:''};
@@ -105,6 +105,35 @@ describe('createOrder',()=>{
     assert.equal((await db.collection('orders').get()).size,1);
     const history=(await db.collection('inventoryHistory').get()).docs.map(doc=>doc.data());
     assert.equal(history.filter(entry=>entry.type==='order_reservation').length,1);
+  });
+
+  test('expired reservation pagination skips a malformed record and processes later pages',async()=>{
+    const Timestamp=admin.firestore.Timestamp;
+    const expiredAt=Date.now()-5*60*1000;
+    await db.doc('orders/a-malformed-expired-reservation').set({
+      status:'Pending',stockReserved:true,stockDeducted:false,
+      reservationExpiresAt:Timestamp.fromMillis(expiredAt-1000),
+      items:[{sku:'OIL1',qty:'not-a-number'}]
+    });
+    const batchSize=400;
+    let batch=db.batch();
+    for(let i=0;i<batchSize;i++){
+      batch.set(db.doc(`orders/z-expired-reservation-${String(i).padStart(3,'0')}`),{
+        status:'Pending',stockReserved:true,stockDeducted:false,
+        reservationExpiresAt:Timestamp.fromMillis(expiredAt),
+        items:[{sku:'OIL1',qty:1}]
+      });
+      if((i+1)%400===0)await batch.commit();
+    }
+    const response=await fetch('http://127.0.0.1:5001/demo-stfreshmart/asia-southeast1/expireStockReservations-0',{method:'POST'});
+    assert.ok(response.ok,`scheduler invocation returned ${response.status}: ${await response.text()}`);
+    const malformed=(await db.doc('orders/a-malformed-expired-reservation').get()).data();
+    assert.equal(malformed.status,'Pending','invalid reservation must not be cancelled or release stock');
+    const orders=await db.collection('orders').where('stockReserved','==',false).get();
+    assert.equal(orders.size,batchSize);
+    assert.equal(await stock('OIL1'),5+batchSize);
+    const history=await db.collection('inventoryHistory').where('type','==','reservation_release').get();
+    assert.equal(history.size,batchSize);
   });
 
   test('reserves stock atomically when an order is placed',async()=>{
