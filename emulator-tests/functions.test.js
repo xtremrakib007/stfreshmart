@@ -92,9 +92,18 @@ describe('createOrder',()=>{
     assert.equal((await call('createOrder',orderData({RICE5:2}),customerToken)).result.total,40);
   });
 
-  test('does not deduct stock when an order is placed',async()=>{
-    await call('createOrder',orderData({RICE5:5}));
-    assert.equal(await stock('RICE5'),50);
+  test('reserves stock atomically when an order is placed',async()=>{
+    const result=await call('createOrder',orderData({RICE5:5}));
+    assert.equal(await stock('RICE5'),45);
+    const order=(await db.doc(`orders/${result.result.orderId}`).get()).data();
+    assert.equal(order.stockReserved,true);
+    assert.equal(order.stockDeducted,false);
+    assert.ok(order.reservationExpiresAt);
+    const history=(await db.collection('inventoryHistory').get()).docs.map(d=>d.data());
+    assert.equal(history.length,1);
+    assert.equal(history[0].type,'order_reservation');
+    assert.equal(history[0].sku,'RICE5');
+    assert.equal(history[0].qty,5);
   });
 
   test('customers cannot order inactive products, active staff can',async()=>{
