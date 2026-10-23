@@ -92,6 +92,21 @@ describe('createOrder',()=>{
     assert.equal((await call('createOrder',orderData({RICE5:2}),customerToken)).result.total,40);
   });
 
+  test('concurrent different checkouts cannot reserve more stock than available',async()=>{
+    const first=orderData({OIL1:4},{requestId:'parallel-stock-reservation-0001'});
+    const second=orderData({OIL1:4},{requestId:'parallel-stock-reservation-0002'});
+    const results=await Promise.all([call('createOrder',first),call('createOrder',second)]);
+    const successes=results.filter(result=>result.result);
+    const failures=results.filter(result=>result.error);
+    assert.equal(successes.length,1);
+    assert.equal(failures.length,1);
+    assert.equal(errorStatus(failures[0]),'FAILED_PRECONDITION');
+    assert.equal(await stock('OIL1'),1);
+    assert.equal((await db.collection('orders').get()).size,1);
+    const history=(await db.collection('inventoryHistory').get()).docs.map(doc=>doc.data());
+    assert.equal(history.filter(entry=>entry.type==='order_reservation').length,1);
+  });
+
   test('reserves stock atomically when an order is placed',async()=>{
     const result=await call('createOrder',orderData({RICE5:5}));
     assert.equal(await stock('RICE5'),45);
