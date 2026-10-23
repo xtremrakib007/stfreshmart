@@ -40,7 +40,7 @@ test('inventory workflow validates SKU, combined quantities, and next stock',()=
 
 test('order status changes and stock history remain in one transaction',()=>{
   assert.match(source,/await db\.runTransaction\(async tx=>\{/);
-  assert.match(source,/tx\.update\(orderRef,\{status:to/);
+  assert.match(source,/tx\.update\(orderRef,\{[\s\S]*?status:to/);
   assert.match(source,/tx\.set\(db\.collection\(\x27inventoryHistory\x27\)\.doc\(\)/);
 });
 
@@ -104,5 +104,30 @@ test('staff deactivation cannot remove the last active admin and serializes conc
 
 test('order status changes create an append-only audit record in the stock transaction',()=>{
   assert.match(source,/tx\.set\(db\.collection\('orderStatusHistory'\)\.doc\(\),\{[\s\S]*?orderId,from:order\.status,to,changedBy:req\.auth\.uid,actorRole:userSnap\.data\(\)\.role,[\s\S]*?at:FieldValue\.serverTimestamp\(\)/);
-  assert.match(source,/tx\.update\(orderRef,\{status:to[\s\S]*?orderStatusHistory/);
+  assert.match(source,/tx\.update\(orderRef,\{[\s\S]*?status:to[\s\S]*?orderStatusHistory/);
+});
+
+
+test('checkout reserves stock in the same transaction as idempotent order creation',()=>{
+  assert.match(source,/stockReserved:true,stockDeducted:false,reservationExpiresAt:Timestamp\.fromMillis/);
+  assert.match(source,/Re-read every product inside the idempotency transaction/);
+  assert.match(source,/const reservationSnaps=await Promise\.all\(reservationRefs\.map\(productRef=>tx\.get\(productRef\)\)\)/);
+  assert.match(source,/tx\.update\(reservation\.ref,\{stock:reservation\.to\}\)/);
+  assert.match(source,/type:'order_reservation',orderId:ref\.id/);
+  assert.match(source,/tx\.create\(ref,order\)[\s\S]*?tx\.create\(requestRef/);
+});
+
+test('acceptance consumes reserved stock without double deduction and cancellation releases it',()=>{
+  assert.match(source,/const consumeReservation=to==='Accepted'&&order\.stockReserved===true&&!order\.stockDeducted/);
+  assert.match(source,/const restore=to==='Cancelled'&&\(order\.stockReserved===true\|\|order\.stockDeducted===true\)/);
+  assert.match(source,/deduct\|\|consumeReservation\?\{stockDeducted:true,stockReserved:false,reservationExpiresAt:FieldValue\.delete\(\)\}/);
+  assert.match(source,/restore\?\{stockDeducted:false,stockReserved:false,reservationExpiresAt:FieldValue\.delete\(\)\}/);
+});
+
+test('expired pending reservations are transactionally released with inventory and status audit records',()=>{
+  assert.match(source,/exports\.expireStockReservations=onSchedule/);
+  assert.match(source,/\.where\('reservationExpiresAt','<=',now\)/);
+  assert.match(source,/order\.status!=='Pending'\|\|order\.stockReserved!==true/);
+  assert.match(source,/type:'reservation_release',orderId:orderRef\.id/);
+  assert.match(source,/reason:'reservation_expired'/);
 });
