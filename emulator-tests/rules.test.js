@@ -142,6 +142,26 @@ describe('orders',()=>{
   });
 });
 
+describe('orderStatusHistory',()=>{
+  test('active staff can read status audit entries but clients cannot',async()=>{
+    await env.withSecurityRulesDisabled(async ctx=>{
+      await setDoc(doc(ctx.firestore(),'orderStatusHistory/status1'),{
+        orderId:'order1',from:'Pending',to:'Accepted',changedBy:'admin',actorRole:'admin',at:new Date()
+      });
+    });
+    await assertSucceeds(getDoc(doc(as('staff'),'orderStatusHistory/status1')));
+    await assertSucceeds(getDoc(doc(as('admin'),'orderStatusHistory/status1')));
+    await assertFails(getDoc(doc(customer(),'orderStatusHistory/status1')));
+    await assertFails(getDoc(doc(guest(),'orderStatusHistory/status1')));
+  });
+  test('clients cannot create, modify or delete order status audit entries',async()=>{
+    const entry={orderId:'order1',from:'Pending',to:'Accepted',changedBy:'admin',actorRole:'admin',at:serverTimestamp()};
+    await assertFails(addDoc(collection(as('admin'),'orderStatusHistory'),entry));
+    await assertFails(updateDoc(doc(as('admin'),'orderStatusHistory/status1'),{to:'Delivered'}));
+    await assertFails(deleteDoc(doc(as('admin'),'orderStatusHistory/status1')));
+  });
+});
+
 describe('inventoryHistory',()=>{
   const manual=()=>({sku:'ACTIVE1',from:5,to:6,reason:'manual',at:serverTimestamp()});
   test('stock history can only be written by trusted server-side functions',async()=>{
