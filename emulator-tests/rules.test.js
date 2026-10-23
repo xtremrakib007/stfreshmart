@@ -186,6 +186,7 @@ describe('storage',()=>{
   });
   test('non-images, files of 5 MB or more, and other paths are rejected',async()=>{
     await assertFails(uploadBytes(ref(storageAs('admin'),'products/a.html'),image,{contentType:'text/html'}));
+    await assertFails(uploadBytes(ref(storageAs('admin'),'products/a.svg'),image,{contentType:'image/svg+xml'}));
     await assertFails(uploadBytes(ref(storageAs('admin'),'products/big.png'),new Uint8Array(5*1024*1024),{contentType:'image/png'}));
     await assertFails(uploadBytes(ref(storageAs('admin'),'other/a.png'),image,{contentType:'image/png'}));
   });
