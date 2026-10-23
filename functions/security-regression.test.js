@@ -78,3 +78,6 @@ test('supplier directory writes are admin-guarded and validate contact fields',(
   assert.match(source,/Supplier ID is invalid/);
   assert.match(source,/updatedBy:req\.auth\.uid/);
 });
+
+
+test('checkout App Check enforcement is opt-in through an explicit environment flag',()=>{\n  assert.match(source,/const checkoutAppCheckEnforced=process\\.env\\.ENFORCE_CHECKOUT_APP_CHECK===\\x27true\\x27/);\n  assert.match(source,/onCall\\(\\{\\.\\.\\.opt, enforceAppCheck:checkoutAppCheckEnforced\\}/);\n});\n
