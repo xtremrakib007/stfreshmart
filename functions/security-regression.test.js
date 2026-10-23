@@ -93,3 +93,11 @@ test('private product migration preserves existing staff prices and removes lega
   assert.match(source,/remove\.staffPrice=FieldValue\.delete\(\)/);
   assert.match(source,/staffPricesMigrated/);
 });
+
+test('staff deactivation cannot remove the last active admin and serializes concurrent changes',()=>{
+  assert.match(source,/const adminAccessLockRef=db\.doc\('settings\/adminAccessLock'\)/);
+  assert.match(source,/await db\.runTransaction\(async tx=>\{[\s\S]*?tx\.get\(db\.collection\('users'\)\.where\('role','==','admin'\)\.where\('active','==',true\)\)/);
+  assert.match(source,/admins\.size<=1[\s\S]*?The last active admin cannot be deactivated/);
+  assert.match(source,/tx\.set\(adminAccessLockRef/);
+  assert.match(source,/Failed to restore staff profile after Auth status update failure/);
+});
