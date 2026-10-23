@@ -82,7 +82,9 @@ exports.resetStaffPassword=onCall(opt,async req=>{await guard(req);
   catch(e){console.error('Staff password reset link generation failed.',e);throw new HttpsError('internal','Could not generate a password reset link.');}
 });
 // All customer order prices are recalculated here. The browser submits only product IDs and quantities.
-exports.createOrder=onCall({...opt, enforceAppCheck:false},async req=>{
+// Enforcement is explicitly opt-in until the production web app is attested and verified.
+const checkoutAppCheckEnforced=process.env.ENFORCE_CHECKOUT_APP_CHECK==='true';
+exports.createOrder=onCall({...opt, enforceAppCheck:checkoutAppCheckEnforced},async req=>{
   const data=req.data||{};
   const requestId=data.requestId;
   if(typeof requestId!=='string'||! /^[A-Za-z0-9_-]{16,128}$/.test(requestId))
