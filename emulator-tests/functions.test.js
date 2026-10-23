@@ -125,7 +125,7 @@ describe('createOrder',()=>{
       });
       if((i+1)%400===0)await batch.commit();
     }
-    const response=await fetch('http://127.0.0.1:5001/demo-stfreshmart/asia-southeast1/expireStockReservations',{method:'POST'});
+    const response=await fetch('http://127.0.0.1:5001/demo-stfreshmart/asia-southeast1/expireStockReservations-0',{method:'POST'});
     assert.ok(response.ok,`scheduler invocation returned ${response.status}: ${await response.text()}`);
     const malformed=(await db.doc('orders/a-malformed-expired-reservation').get()).data();
     assert.equal(malformed.status,'Pending','invalid reservation must not be cancelled or release stock');
