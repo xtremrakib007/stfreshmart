@@ -455,6 +455,11 @@ exports.updateOrderStatus=onCall(opt,async req=>{
       });
     }
     tx.update(orderRef,{status:to,...(deduct?{stockDeducted:true}:{}),...(restore?{stockDeducted:false}:{})});
+    // Preserve an append-only status audit in the same transaction as the order/stock change.
+    tx.set(db.collection('orderStatusHistory').doc(),{
+      orderId,from:order.status,to,changedBy:req.auth.uid,actorRole:userSnap.data().role,
+      at:FieldValue.serverTimestamp()
+    });
   });
   return {ok:true,status:to};
 });
