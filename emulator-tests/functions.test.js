@@ -1,7 +1,7 @@
 'use strict';
 const {test,beforeEach,describe}=require('node:test');
 const assert=require('node:assert/strict');
-const {db,auth,resetEmulators,createUser,call}=require('./helpers');
+const {admin,db,auth,resetEmulators,createUser,call}=require('./helpers');
 
 const pickup={date:'2026-11-01',time:'10:00',collector:'Ali'};
 const customer={name:'Test Customer',phone:'0123456789',company:''};
