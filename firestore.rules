@@ -93,6 +93,11 @@ service cloud.firestore {
       allow create: if false;
       allow update, delete: if false;
     }
+    match /orderStatusHistory/{id} {
+      allow read: if isStaff();
+      // Order status transitions are audited only by trusted server-side callables.
+      allow create, update, delete: if false;
+    }
     match /suppliers/{id} {
       allow read: if isStaff();
       // Supplier records are changed only through the admin-guarded saveSupplier callable.

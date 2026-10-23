@@ -101,3 +101,8 @@ test('staff deactivation cannot remove the last active admin and serializes conc
   assert.match(source,/tx\.set\(adminAccessLockRef/);
   assert.match(source,/Failed to restore staff profile after Auth status update failure/);
 });
+
+test('order status changes create an append-only audit record in the stock transaction',()=>{
+  assert.match(source,/tx\.set\(db\.collection\('orderStatusHistory'\)\.doc\(\),\{[\s\S]*?orderId,from:order\.status,to,changedBy:req\.auth\.uid,actorRole:userSnap\.data\(\)\.role,[\s\S]*?at:FieldValue\.serverTimestamp\(\)/);
+  assert.match(source,/tx\.update\(orderRef,\{status:to[\s\S]*?orderStatusHistory/);
+});
