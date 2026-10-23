@@ -5,7 +5,7 @@
 2. Install dependencies: `npm i` and `cd functions && npm i && cd ..`. Copy `.env.example` to `.env.local` and fill in the web app keys.
 3. Select the Firebase project with `firebase use --add`, then run `npm run build` and `firebase deploy --only functions,hosting,storage`. **Do not deploy Firestore rules yet**; migrate legacy private-price fields first.
 4. Create the first admin manually: add a user in Firebase Authentication, then create `users/<uid>` with `{name, email, role:"admin", active:true}`. Sign in as this administrator.
-5. Back up/export Firestore in the Firebase Console. Open Admin > Products, run “Migrate legacy private price fields”, and verify the reported counts plus sample product documents.
+5. Back up/export Firestore in the Firebase Console. Open Admin > Products and run “Preview private price migration (read-only)” first. Review its counts, then run “Migrate legacy private price fields” and verify the reported counts plus sample product documents. The preview does not write data and may become stale if products change.
 6. Only after the migration succeeds, deploy hardened Firestore rules: `firebase deploy --only firestore:rules`.
 7. Verify customer checkout, staff order workflow, admin product editing, and that customer/staff accounts cannot read `productPrivate` documents.
 8. Open Admin > Settings to set the company name, logo and WhatsApp number (for example, `60123456789`).
