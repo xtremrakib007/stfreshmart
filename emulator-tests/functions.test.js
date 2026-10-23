@@ -103,7 +103,7 @@ describe('createOrder',()=>{
     assert.equal(history.length,1);
     assert.equal(history[0].type,'order_reservation');
     assert.equal(history[0].sku,'RICE5');
-    assert.equal(history[0].qty,5);
+    assert.equal(history[0].quantity,5);
   });
 
   test('customers cannot order inactive products, active staff can',async()=>{
