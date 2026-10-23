@@ -156,6 +156,11 @@ describe('orderStatusHistory',()=>{
   });
   test('clients cannot create, modify or delete order status audit entries',async()=>{
     const entry={orderId:'order1',from:'Pending',to:'Accepted',changedBy:'admin',actorRole:'admin',at:serverTimestamp()};
+    await env.withSecurityRulesDisabled(async ctx=>{
+      await setDoc(doc(ctx.firestore(),'orderStatusHistory/status1'),{
+        orderId:'order1',from:'Pending',to:'Accepted',changedBy:'admin',actorRole:'admin',at:new Date()
+      });
+    });
     await assertFails(addDoc(collection(as('admin'),'orderStatusHistory'),entry));
     await assertFails(updateDoc(doc(as('admin'),'orderStatusHistory/status1'),{to:'Delivered'}));
     await assertFails(deleteDoc(doc(as('admin'),'orderStatusHistory/status1')));
