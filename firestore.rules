@@ -53,10 +53,10 @@ service cloud.firestore {
       // Private cost and minimum-price fields must never be stored here.
       allow create: if isAdmin()
         && request.resource.data.stock == 0
-        && !request.resource.data.keys().hasAny(['purchasePrice', 'minPricePcs', 'minPriceCtn']);
+        && !request.resource.data.keys().hasAny(['purchasePrice', 'minPricePcs', 'minPriceCtn', 'staffPrice']);
       allow update: if isAdmin()
         && request.resource.data.stock == resource.data.stock
-        && !request.resource.data.keys().hasAny(['purchasePrice', 'minPricePcs', 'minPriceCtn']);
+        && !request.resource.data.keys().hasAny(['purchasePrice', 'minPricePcs', 'minPriceCtn', 'staffPrice']);
       allow delete: if isAdmin();
     }
     match /productPrivate/{id} {
