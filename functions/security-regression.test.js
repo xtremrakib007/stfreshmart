@@ -131,3 +131,11 @@ test('expired pending reservations are transactionally released with inventory a
   assert.match(source,/type:'reservation_release',orderId:orderRef\.id/);
   assert.match(source,/reason:'reservation_expired'/);
 });
+
+
+test('private price migration supports a read-only preview with migration counts',()=>{
+  assert.match(source,/const dryRun=req\.data\?\.dryRun===true/);
+  assert.match(source,/privateFieldsFound,legacyStaffPricesFound,existingPrivateDocs,existingStaffPriceDocs/);
+  assert.match(source,/dryRun\?'Read-only preview completed\. No documents were changed\.'/);
+  assert.match(source,/if\(!dryRun&&batchHasWrites\)await batch\.commit\(\)/);
+});
