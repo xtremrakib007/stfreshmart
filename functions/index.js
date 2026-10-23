@@ -246,6 +246,11 @@ exports.createOrder=onCall({...opt, enforceAppCheck:checkoutAppCheckEnforced},as
     // before creating the order. Concurrent checkouts contend on the same product docs.
     const reservationRefs=lines.map(line=>db.doc(`products/${line.sku}`));
     const reservationSnaps=await Promise.all(reservationRefs.map(productRef=>tx.get(productRef)));
+    // Staff prices are also transaction reads: a concurrent catalog or staff-price edit
+    // causes Firestore to retry this transaction, then the price check below rejects stale quotes.
+    const staffPriceSnaps=role!=='customer'
+      ? await Promise.all(lines.map(line=>tx.get(db.doc(`staffPrices/${line.sku}`))))
+      : [];
     const reservations=[];
     for(let i=0;i<reservationSnaps.length;i++){
       const productSnap=reservationSnaps[i],line=lines[i];
@@ -255,6 +260,24 @@ exports.createOrder=onCall({...opt, enforceAppCheck:checkoutAppCheckEnforced},as
         throw new HttpsError('failed-precondition',`Product ${line.sku} is unavailable.`);
       if(!Number.isSafeInteger(stock)||stock<0||stock<line.qty)
         throw new HttpsError('failed-precondition',`Insufficient stock for ${current.name||line.sku}.`);
+
+      let currentPrice=Number(current.retailPrice);
+      let hasCurrentStaffPrice=false;
+      if(role!=='customer'&&staffPriceSnaps[i].exists&&Number.isFinite(Number(staffPriceSnaps[i].data().price))){
+        currentPrice=Number(staffPriceSnaps[i].data().price);
+        hasCurrentStaffPrice=true;
+      }
+      if(!hasCurrentStaffPrice){
+        const slabs=Array.isArray(current.priceSlabs)
+          ? current.priceSlabs.filter(s=>Number(s.minQty)>0&&Number(s.price)>0).sort((a,b)=>Number(b.minQty)-Number(a.minQty))
+          : [];
+        const slab=slabs.find(s=>line.qty>=Number(s.minQty));
+        if(slab)currentPrice=Number(slab.price);
+        else if(Number(current.promoPrice)>0)currentPrice=Number(current.promoPrice);
+      }
+      if(!Number.isFinite(currentPrice)||currentPrice<0||currentPrice!==line.price)
+        throw new HttpsError('failed-precondition','A product price changed during checkout. Refresh the product prices and try again.');
+
       reservations.push({ref:productSnap.ref,sku:line.sku,from:stock,to:stock-line.qty,qty:line.qty});
     }
     for(const reservation of reservations){
