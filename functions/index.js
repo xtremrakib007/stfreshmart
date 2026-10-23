@@ -1,6 +1,7 @@
 const {onCall,HttpsError}=require('firebase-functions/v2/https');
+const {onSchedule}=require('firebase-functions/v2/scheduler');
 const admin=require('firebase-admin');
-const {FieldValue}=require('firebase-admin/firestore');
+const {FieldValue,Timestamp}=require('firebase-admin/firestore');
 const crypto=require('crypto');
 admin.initializeApp();
 const opt={region:'asia-southeast1'};
@@ -225,7 +226,7 @@ exports.createOrder=onCall({...opt, enforceAppCheck:checkoutAppCheckEnforced},as
     `Verified total: ${currency}${total.toFixed(2)}`,
     cleanDelivery.instructions||cleanDelivery.notes||''
   ].filter(Boolean).join('\n');
-  const order={customer:normalizedCustomer,method,delivery:cleanDelivery,items:lines,total,currency,status:'Pending',placedBy:role,message,createdAt:FieldValue.serverTimestamp()};
+  const order={customer:normalizedCustomer,method,delivery:cleanDelivery,items:lines,total,currency,status:'Pending',placedBy:role,message,stockReserved:true,stockDeducted:false,reservationExpiresAt:Timestamp.fromMillis(Date.now()+60*60*1000),createdAt:FieldValue.serverTimestamp()};
   // A stable request ID makes client retries safe. Scope keys to the authenticated user
   // (or the guest namespace) and bind each key to the validated request payload.
   const ref=db.collection('orders').doc();
@@ -240,6 +241,29 @@ exports.createOrder=onCall({...opt, enforceAppCheck:checkoutAppCheckEnforced},as
         throw new HttpsError('failed-precondition','The original order record is unavailable. Contact support before retrying.');
       const existing=priorOrder.data();
       return {orderId:saved.orderId,lines:existing.items,total:existing.total,currency:existing.currency||currency,message:existing.message};
+    }
+    // Re-read every product inside the idempotency transaction, then reserve stock
+    // before creating the order. Concurrent checkouts contend on the same product docs.
+    const reservationRefs=lines.map(line=>db.doc(`products/${line.sku}`));
+    const reservationSnaps=await Promise.all(reservationRefs.map(productRef=>tx.get(productRef)));
+    const reservations=[];
+    for(let i=0;i<reservationSnaps.length;i++){
+      const productSnap=reservationSnaps[i],line=lines[i];
+      if(!productSnap.exists)throw new HttpsError('failed-precondition',`Product ${line.sku} is unavailable.`);
+      const current=productSnap.data(),stock=Number(current.stock);
+      if(role==='customer'&&current.status!=='active')
+        throw new HttpsError('failed-precondition',`Product ${line.sku} is unavailable.`);
+      if(!Number.isSafeInteger(stock)||stock<0||stock<line.qty)
+        throw new HttpsError('failed-precondition',`Insufficient stock for ${current.name||line.sku}.`);
+      reservations.push({ref:productSnap.ref,sku:line.sku,from:stock,to:stock-line.qty,qty:line.qty});
+    }
+    for(const reservation of reservations){
+      tx.update(reservation.ref,{stock:reservation.to});
+      tx.set(db.collection('inventoryHistory').doc(),{
+        sku:reservation.sku,from:reservation.from,to:reservation.to,
+        reason:`order reservation ${ref.id}`,type:'order_reservation',orderId:ref.id,
+        quantity:reservation.qty,at:FieldValue.serverTimestamp(),changedBy:req.auth?req.auth.uid:'guest'
+      });
     }
     tx.create(ref,order);
     tx.create(requestRef,{fingerprint,orderId:ref.id,createdAt:FieldValue.serverTimestamp()});
@@ -411,8 +435,11 @@ exports.updateOrderStatus=onCall(opt,async req=>{
     const order=orderSnap.data();
     if(!(allowed[order.status]||[]).includes(to))
       throw new HttpsError('failed-precondition','This status transition is not allowed.');
-    const deduct=to==='Accepted'&&!order.stockDeducted;
-    const restore=to==='Cancelled'&&order.stockDeducted===true;
+    // New orders reserve stock at checkout. Acceptance consumes that reservation
+    // without a second deduction; cancellation restores either reserved or consumed stock.
+    const consumeReservation=to==='Accepted'&&order.stockReserved===true&&!order.stockDeducted;
+    const deduct=to==='Accepted'&&!order.stockDeducted&&order.stockReserved!==true;
+    const restore=to==='Cancelled'&&(order.stockReserved===true||order.stockDeducted===true);
     const items=Array.isArray(order.items)?order.items:[];
     if((deduct||restore)&&(!items.length||items.length>100))
       throw new HttpsError('failed-precondition','Order items are invalid.');
@@ -454,7 +481,11 @@ exports.updateOrderStatus=onCall(opt,async req=>{
         at:FieldValue.serverTimestamp(),changedBy:req.auth.uid
       });
     }
-    tx.update(orderRef,{status:to,...(deduct?{stockDeducted:true}:{}),...(restore?{stockDeducted:false}:{})});
+    tx.update(orderRef,{
+      status:to,
+      ...(deduct||consumeReservation?{stockDeducted:true,stockReserved:false,reservationExpiresAt:FieldValue.delete()}:{}),
+      ...(restore?{stockDeducted:false,stockReserved:false,reservationExpiresAt:FieldValue.delete()}: {})
+    });
     // Preserve an append-only status audit in the same transaction as the order/stock change.
     tx.set(db.collection('orderStatusHistory').doc(),{
       orderId,from:order.status,to,changedBy:req.auth.uid,actorRole:userSnap.data().role,
@@ -462,6 +493,68 @@ exports.updateOrderStatus=onCall(opt,async req=>{
     });
   });
   return {ok:true,status:to};
+});
+
+
+// Release abandoned checkout reservations. The query is intentionally bounded; each
+// candidate is rechecked transactionally so acceptance/cancellation cannot race expiry.
+exports.expireStockReservations=onSchedule({schedule:'every 10 minutes',timeZone:'Asia/Kuala_Lumpur',region:'asia-southeast1',maxInstances:1},async()=>{
+  const now=Timestamp.now();
+  const expired=await db.collection('orders')
+    .where('reservationExpiresAt','<=',now)
+    .limit(100).get();
+  for(const candidate of expired.docs){
+    const orderRef=candidate.ref;
+    try{
+      await db.runTransaction(async tx=>{
+        const snap=await tx.get(orderRef);
+        if(!snap.exists)return;
+        const order=snap.data();
+        if(order.status!=='Pending'||order.stockReserved!==true||
+           !order.reservationExpiresAt||order.reservationExpiresAt.toMillis()>now.toMillis())return;
+        const items=Array.isArray(order.items)?order.items:[];
+        if(!items.length||items.length>100)throw new Error('Invalid items on expired reservation.');
+        const quantities=new Map();
+        for(const item of items){
+          if(!item||typeof item.sku!=='string'||! /^[A-Za-z0-9._-]{1,100}$/.test(item.sku.trim()))
+            throw new Error('Invalid SKU on expired reservation.');
+          const sku=item.sku.trim().toUpperCase(),qty=Number(item.qty);
+          if(!Number.isSafeInteger(qty)||qty<1||qty>100000)throw new Error('Invalid quantity on expired reservation.');
+          const combined=(quantities.get(sku)||0)+qty;
+          if(!Number.isSafeInteger(combined)||combined>100000)throw new Error('Invalid combined quantity on expired reservation.');
+          quantities.set(sku,combined);
+        }
+        const entries=[...quantities.entries()];
+        const refs=entries.map(([sku])=>db.doc(`products/${sku}`));
+        const products=await Promise.all(refs.map(productRef=>tx.get(productRef)));
+        const changes=[];
+        for(let i=0;i<products.length;i++){
+          const product=products[i],[sku,qty]=entries[i];
+          if(!product.exists)throw new Error(`Missing product ${sku} while releasing reservation.`);
+          const stock=Number(product.data().stock),next=stock+qty;
+          if(!Number.isSafeInteger(stock)||stock<0||!Number.isSafeInteger(next)||next<0)
+            throw new Error(`Invalid stock while releasing reservation for ${sku}.`);
+          changes.push({ref:product.ref,sku,from:stock,to:next,qty});
+        }
+        for(const c of changes){
+          tx.update(c.ref,{stock:c.to});
+          tx.set(db.collection('inventoryHistory').doc(),{
+            sku:c.sku,from:c.from,to:c.to,reason:`expired order reservation ${orderRef.id}`,
+            type:'reservation_release',orderId:orderRef.id,quantity:c.qty,
+            at:FieldValue.serverTimestamp(),changedBy:'system'
+          });
+        }
+        tx.update(orderRef,{status:'Cancelled',stockReserved:false,stockDeducted:false,
+          reservationExpiresAt:FieldValue.delete(),cancellationReason:'Reservation expired'});
+        tx.set(db.collection('orderStatusHistory').doc(),{
+          orderId:orderRef.id,from:order.status,to:'Cancelled',changedBy:'system',actorRole:'system',
+          reason:'reservation_expired',at:FieldValue.serverTimestamp()
+        });
+      });
+    }catch(error){
+      console.error('Failed to release expired stock reservation.',{orderId:orderRef.id,error});
+    }
+  }
 });
 
 
