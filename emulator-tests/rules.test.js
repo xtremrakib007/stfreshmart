@@ -69,7 +69,7 @@ describe('products',()=>{
     await assertFails(deleteDoc(doc(as('staff'),'products/ACTIVE1')));
   });
   test('private cost fields cannot be stored on product documents',async()=>{
-    for(const key of ['purchasePrice','minPricePcs','minPriceCtn']){
+    for(const key of ['purchasePrice','minPricePcs','minPriceCtn','staffPrice']){
       await assertFails(setDoc(doc(as('admin'),'products/NEW1'),{name:'New',status:'active',[key]:1}));
       await assertFails(updateDoc(doc(as('admin'),'products/ACTIVE1'),{[key]:1}));
     }

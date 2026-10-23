@@ -84,3 +84,12 @@ test('checkout App Check enforcement is opt-in through an explicit environment f
   assert.match(source,/const checkoutAppCheckEnforced=process\.env\.ENFORCE_CHECKOUT_APP_CHECK==='true'/);
   assert.match(source,/onCall\(\{\.\.\.opt, enforceAppCheck:checkoutAppCheckEnforced\}/);
 });
+
+
+test('private product migration preserves existing staff prices and removes legacy public price fields',()=>{
+  assert.match(source,/exports\.migratePrivateProductFields=onCall/);
+  assert.match(source,/db\.getAll\(\.\.\.staffRefs\)/);
+  assert.match(source,/!existingStaffPrices\[i\]\.exists&&Number\.isFinite\(legacyPrice\)/);
+  assert.match(source,/remove\.staffPrice=FieldValue\.delete\(\)/);
+  assert.match(source,/staffPricesMigrated/);
+});
