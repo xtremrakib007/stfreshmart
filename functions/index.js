@@ -49,19 +49,38 @@ exports.setStaffActive=onCall(opt,async req=>{await guard(req);
   const targetUid=uid.trim();
   if(targetUid===req.auth.uid)throw new HttpsError('failed-precondition','You cannot change your own account status.');
   const userRef=db.doc(`users/${targetUid}`);
-  const userSnap=await userRef.get();
-  if(!userSnap.exists||!['staff','admin'].includes(userSnap.data().role))
-    throw new HttpsError('not-found','Staff account not found.');
+  // Every staff-status change writes this coordination document. Firestore transaction
+  // retries serialize concurrent admin deactivations before the active-admin count is trusted.
+  const adminAccessLockRef=db.doc('settings/adminAccessLock');
+  let previousActive;
+  await db.runTransaction(async tx=>{
+    const target=await tx.get(userRef);
+    if(!target.exists||!['staff','admin'].includes(target.data().role))
+      throw new HttpsError('not-found','Staff account not found.');
+    previousActive=target.data().active===true;
+    if(!active&&target.data().role==='admin'&&previousActive){
+      const admins=await tx.get(db.collection('users').where('role','==','admin').where('active','==',true));
+      if(admins.size<=1)
+        throw new HttpsError('failed-precondition','The last active admin cannot be deactivated. Add or activate another admin first.');
+    }
+    tx.set(adminAccessLockRef,{updatedAt:FieldValue.serverTimestamp()},{merge:true});
+    tx.update(userRef,{active});
+  });
   let authUser;
   try{authUser=await admin.auth().getUser(targetUid);}
-  catch(e){if(e.code==='auth/user-not-found')throw new HttpsError('not-found','Staff authentication account not found.');throw e;}
+  catch(e){
+    // Restore the profile state if Auth lookup fails after the Firestore transaction.
+    try{await userRef.update({active:previousActive});}
+    catch(rollbackError){console.error('Failed to restore staff profile after Auth lookup failure.',rollbackError);}
+    if(e.code==='auth/user-not-found')throw new HttpsError('not-found','Staff authentication account not found.');
+    throw e;
+  }
   const previousDisabled=authUser.disabled===true;
-  await admin.auth().updateUser(targetUid,{disabled:!active});
   try{
-    await userRef.update({active});
+    await admin.auth().updateUser(targetUid,{disabled:!active});
   }catch(e){
-    try{await admin.auth().updateUser(targetUid,{disabled:previousDisabled});}
-    catch(rollbackError){console.error('Failed to roll back staff Auth status after Firestore update failure.',rollbackError);}
+    try{await userRef.update({active:previousActive});}
+    catch(rollbackError){console.error('Failed to restore staff profile after Auth status update failure.',rollbackError);}
     throw new HttpsError('internal','Could not update staff status. Please retry or verify the account status.');
   }
   return {ok:true};
